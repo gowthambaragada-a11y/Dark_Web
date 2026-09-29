@@ -1,0 +1,1540 @@
+<!doctype html>
+<html lang="en" class="dark">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ANVAYA // Dark Web Threat Actor De-anonymization</title>
+<meta name="description" content="Offline threat-intelligence platform for dark-web threat-actor de-anonymization. Synthetic corpus, live stylometry, explainable attribution." />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    darkMode: 'class',
+    theme: {
+      extend: {
+        colors: {
+          ink:    { 900:'#05070d', 800:'#0a0e17', 700:'#0f1520', 600:'#141c2b', 500:'#1c2636' },
+          neon:   { 400:'#38bdf8', 500:'#22d3ee', 600:'#0891b2' },
+          alert:  { 400:'#fb7185', 500:'#f43f5e', 600:'#e11d48' },
+        },
+        fontFamily: {
+          mono: ['Consolas','SFMono-Regular','Menlo','monospace'],
+          sans: ['Inter','Segoe UI','system-ui','sans-serif'],
+        },
+      }
+    }
+  }
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/cytoscape@3.30.2/dist/cytoscape.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+<script src="https://unpkg.com/lucide@0.451.0/dist/umd/lucide.min.js"></script>
+<style>
+  html,body{height:100%}
+  body{font-family:'Inter',system-ui,sans-serif;background:#05070d;color:#cbd5e1;
+       background-image:
+         radial-gradient(1200px 600px at 12% -10%, rgba(56,189,248,.10), transparent 60%),
+         radial-gradient(900px 500px at 100% 0%, rgba(244,63,94,.08), transparent 55%);
+       background-attachment:fixed}
+  .mono{font-family:'JetBrains Mono',Consolas,monospace}
+  ::-webkit-scrollbar{width:9px;height:9px}
+  ::-webkit-scrollbar-track{background:#0a0e17}
+  ::-webkit-scrollbar-thumb{background:#22304a;border-radius:5px}
+  ::-webkit-scrollbar-thumb:hover{background:#33456a}
+  .panel{background:linear-gradient(180deg,rgba(15,21,32,.92),rgba(10,14,23,.92));
+         border:1px solid #1c2636;border-radius:10px;
+         box-shadow:0 1px 0 rgba(56,189,248,.06) inset,0 12px 34px -22px rgba(0,0,0,.95)}
+  .panel-title{font-size:10px;letter-spacing:.19em;text-transform:uppercase;color:#64748b;
+               font-weight:600;display:flex;align-items:center;gap:7px}
+  .kpi{position:relative;overflow:hidden}
+  .kpi::after{content:'';position:absolute;inset:auto 0 0 0;height:2px;
+              background:linear-gradient(90deg,transparent,#38bdf8,transparent);opacity:.6}
+  .kpi:hover{border-color:#2b3d5c;transform:translateY(-1px);transition:all .18s}
+  .chip{border:1px solid #22304a;background:#0d1420;color:#94a3b8;border-radius:999px;
+        padding:3px 11px;font-size:11px;cursor:pointer;transition:all .14s;white-space:nowrap;
+        user-select:none}
+  .chip:hover{border-color:#38bdf8;color:#e2e8f0}
+  .chip.on{background:rgba(56,189,248,.16);border-color:#38bdf8;color:#7dd3fc;
+           box-shadow:0 0 0 1px rgba(56,189,248,.22)}
+  .btn{display:inline-flex;align-items:center;gap:6px;border-radius:7px;padding:7px 13px;
+       font-size:12px;font-weight:500;border:1px solid #22304a;background:#0f1724;
+       color:#cbd5e1;cursor:pointer;transition:all .14s;white-space:nowrap}
+  .btn:hover{border-color:#38bdf8;color:#e0f2fe;background:#132033}
+  .btn-primary{background:linear-gradient(180deg,#0ea5e9,#0284c7);border-color:#0284c7;
+               color:#fff;font-weight:600}
+  .btn-primary:hover{filter:brightness(1.12)}
+  .btn-alert{background:linear-gradient(180deg,#f43f5e,#be123c);border-color:#be123c;color:#fff}
+  .btn-alert:hover{filter:brightness(1.12)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .inp{background:#080d16;border:1px solid #1c2636;border-radius:7px;padding:7px 10px;
+       color:#e2e8f0;font-size:12px;width:100%;outline:none;transition:border-color .15s}
+  .inp:focus{border-color:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.10)}
+  .scan{height:5px;background:#131c2b;border-radius:3px;overflow:hidden}
+  .scan > i{display:block;height:100%;border-radius:3px;transition:width .5s cubic-bezier(.4,0,.2,1)}
+  .tbl th{position:sticky;top:0;background:#0d1420;font-size:9.5px;letter-spacing:.14em;
+          text-transform:uppercase;color:#64748b;font-weight:600;text-align:left;
+          padding:8px 10px;border-bottom:1px solid #1c2636;cursor:pointer;white-space:nowrap;z-index:2}
+  .tbl th:hover{color:#38bdf8}
+  .tbl td{padding:8px 10px;border-bottom:1px solid #0d1420;font-size:12px;vertical-align:middle}
+  .tbl tbody tr{cursor:pointer;transition:background .12s}
+  .tbl tbody tr:hover{background:rgba(56,189,248,.07)}
+  .tbl tbody tr.sel{background:rgba(56,189,248,.13);box-shadow:inset 2px 0 0 #38bdf8}
+  .tag{display:inline-block;padding:1.5px 7px;border-radius:4px;font-size:10px;
+       font-weight:600;letter-spacing:.04em;white-space:nowrap}
+  .gauge-track{stroke:#131c2b}
+  .row-hover:hover{background:rgba(56,189,248,.05)}
+  #cy{width:100%;height:100%;display:block;background:
+      radial-gradient(700px 400px at 50% 45%,rgba(56,189,248,.05),transparent 70%)}
+  .pulse{animation:pulse 2.4s ease-in-out infinite}
+  @keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+  .sweep{background:linear-gradient(90deg,transparent,rgba(56,189,248,.14),transparent);
+         background-size:200% 100%;animation:sweep 1.6s linear infinite}
+  @keyframes sweep{0%{background-position:200% 0}100%{background-position:-200% 0}}
+  .dossier pre{white-space:pre-wrap;font-size:11.5px;line-height:1.55;color:#94a3b8}
+  .fade-in{animation:fade .3s ease both}
+  @keyframes fade{from{opacity:0;transform:translateY(5px)}to{opacity:1;transform:none}}
+  .hr{height:1px;background:linear-gradient(90deg,transparent,#1c2636,transparent)}
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- ===================== BOOT / OFFLINE GUARD ===================== -->
+<div id="boot" class="fixed inset-0 z-[100] flex items-center justify-center bg-ink-900">
+  <div class="text-center">
+    <div class="flex items-center justify-center gap-3 mb-5">
+      <div class="w-11 h-11 rounded-lg border border-neon-400/40 bg-neon-400/10 flex items-center justify-center pulse">
+        <i data-lucide="radar" class="w-6 h-6 text-neon-400"></i>
+      </div>
+      <div class="text-left">
+        <div class="text-neon-400 font-bold tracking-[.2em] text-sm">ANVAYA</div>
+        <div class="text-slate-500 text-[10px] tracking-[.16em]">DE-ANONYMIZATION PLATFORM</div>
+      </div>
+    </div>
+    <div class="w-72 h-1 bg-ink-600 rounded-full overflow-hidden mx-auto">
+      <div id="bootbar" class="h-full bg-neon-400 rounded-full transition-all duration-300" style="width:8%"></div>
+    </div>
+    <div id="bootmsg" class="mono text-[10px] text-slate-500 mt-3 tracking-wider">connecting to intel core…</div>
+  </div>
+</div>
+
+<div id="cdnwarn" class="hidden fixed inset-x-0 top-0 z-[99] bg-alert-600/95 text-white text-xs px-4 py-2 text-center">
+  <i data-lucide="alert-triangle" class="w-3.5 h-3.5 inline mr-1"></i>
+  A CDN asset failed to load. The dashboard needs internet access on first paint for
+  Tailwind, Cytoscape.js, Chart.js and Lucide. The API itself is fully offline.
+</div>
+
+<!-- ===================== HEADER ===================== -->
+<header class="sticky top-0 z-40 border-b border-ink-600/80 bg-ink-900/85 backdrop-blur-xl">
+  <div class="px-5 py-2.5 flex items-center gap-4 flex-wrap">
+    <div class="flex items-center gap-2.5">
+      <div class="w-9 h-9 rounded-lg border border-neon-400/40 bg-neon-400/10 flex items-center justify-center">
+        <i data-lucide="radar" class="w-5 h-5 text-neon-400"></i>
+      </div>
+      <div>
+        <div class="text-neon-400 font-bold tracking-[.2em] text-[13px] leading-none">ANVAYA</div>
+        <div class="text-slate-500 text-[9px] tracking-[.16em] mt-1">
+          DARK WEB THREAT ACTOR DE-ANONYMIZATION
+        </div>
+      </div>
+    </div>
+
+    <div class="hidden md:flex items-center gap-2 ml-2">
+      <span class="tag bg-alert-500/15 text-alert-400 border border-alert-500/30">TLP:AMBER</span>
+      <span class="tag bg-amber-500/12 text-amber-400 border border-amber-500/25">
+        <i data-lucide="flask-conical" class="w-2.5 h-2.5 inline mr-1"></i>SYNTHETIC CORPUS
+      </span>
+      <span class="tag bg-ink-500 text-slate-400 border border-ink-600" id="corpusver">…</span>
+    </div>
+
+    <div class="flex-1"></div>
+
+    <div class="flex items-center gap-2">
+      <div class="hidden sm:flex items-center gap-1.5 text-[10px] mono text-slate-500 border border-ink-600 rounded-md px-2.5 py-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 pulse"></span>
+        <span>OFFLINE ANALYTICAL MODE</span>
+      </div>
+      <div class="mono text-[11px] text-slate-400 border border-ink-600 rounded-md px-2.5 py-1.5" id="clock">--:--:--</div>
+      <button class="btn btn-alert" onclick="openSandbox()">
+        <i data-lucide="scan-search" class="w-3.5 h-3.5"></i>
+        <span class="hidden sm:inline">De-anonymize Sample</span>
+        <span class="sm:hidden">Scan</span>
+      </button>
+    </div>
+  </div>
+  <div class="px-5 py-1.5 border-t border-ink-600/50 text-[9.5px] text-slate-600 mono flex items-center gap-2">
+    <i data-lucide="info" class="w-2.5 h-2.5 shrink-0"></i>
+    <span>Synthetic demonstration corpus — all hosts use RFC-5737 documentation IPs and
+    RFC-5398 private ASNs. No live scanning, no Tor crawling, no real identifiers.</span>
+  </div>
+</header>
+
+<main class="px-5 py-5 space-y-5 max-w-[2100px] mx-auto">
+
+  <!-- ===================== KPI RIBBON ===================== -->
+  <section class="grid grid-cols-2 lg:grid-cols-4 gap-3.5" id="kpis"></section>
+
+  <!-- ===================== CROSS-MARKET MERGE STRIP ===================== -->
+  <section id="mergestrip" class="hidden"></section>
+
+  <!-- ===================== FILTER BAR ===================== -->
+  <section class="panel p-4">
+    <div class="flex items-center justify-between mb-3">
+      <div class="panel-title">
+        <i data-lucide="filter" class="w-3 h-3"></i>Analytical Filter Bar
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="btn !py-1 !px-2.5 !text-[11px]" onclick="resetFilters()">
+          <i data-lucide="rotate-ccw" class="w-3 h-3"></i>Reset
+        </button>
+        <div class="w-px h-5 bg-ink-600"></div>
+        <span class="text-[10px] text-slate-500 mono" id="matchcount">—</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4">
+      <div class="lg:col-span-4">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">Threat category</label>
+        <div class="flex flex-wrap gap-1.5" id="f-category"></div>
+      </div>
+      <div class="lg:col-span-4">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">Source venue</label>
+        <div class="flex flex-wrap gap-1.5" id="f-source"></div>
+      </div>
+      <div class="lg:col-span-4">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">
+          Observation window <span class="text-slate-600 normal-case tracking-normal">(UTC)</span>
+        </label>
+        <div class="flex items-center gap-2">
+          <input type="date" id="f-start" class="inp mono !text-[11px]" />
+          <i data-lucide="arrow-right" class="w-3 h-3 text-slate-600 shrink-0"></i>
+          <input type="date" id="f-end" class="inp mono !text-[11px]" />
+        </div>
+      </div>
+    </div>
+
+    <div class="hr my-3.5"></div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
+      <div class="lg:col-span-3">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">
+          Minimum confidence — <span class="text-neon-400 mono" id="confval">0%</span>
+        </label>
+        <input type="range" id="f-conf" min="0" max="100" step="5" value="0"
+               class="w-full accent-sky-400 cursor-pointer" />
+        <div class="flex justify-between text-[9px] text-slate-600 mono mt-0.5">
+          <span>0%</span><span>50%</span><span>100%</span>
+        </div>
+      </div>
+      <div class="lg:col-span-3">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">Search</label>
+        <div class="relative">
+          <i data-lucide="search" class="w-3.5 h-3.5 text-slate-600 absolute left-2.5 top-2.5"></i>
+          <input type="text" id="f-q" class="inp !pl-8" placeholder="handle, actor, bio, role…" />
+        </div>
+      </div>
+      <div class="lg:col-span-3">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">Cluster view</label>
+        <label class="flex items-center gap-2 text-[12px] text-slate-300 cursor-pointer">
+          <input type="checkbox" id="f-actoronly" class="accent-sky-400 w-3.5 h-3.5" />
+          Collapse to one persona per cluster
+        </label>
+      </div>
+      <div class="lg:col-span-3">
+        <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">Export intelligence set</label>
+        <div class="flex flex-wrap gap-1.5">
+          <button class="btn !py-1.5 !px-2.5 !text-[11px]" onclick="exportAs('csv')">
+            <i data-lucide="table" class="w-3 h-3 text-emerald-400"></i>CSV
+          </button>
+          <button class="btn !py-1.5 !px-2.5 !text-[11px]" onclick="exportAs('json')">
+            <i data-lucide="braces" class="w-3 h-3 text-amber-400"></i>JSON
+          </button>
+          <button class="btn !py-1.5 !px-2.5 !text-[11px] btn-primary" onclick="exportAs('report')">
+            <i data-lucide="file-text" class="w-3 h-3"></i>Dossier
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== GRAPH + INSPECTOR ===================== -->
+  <section class="grid grid-cols-1 xl:grid-cols-12 gap-4">
+
+    <!-- graph -->
+    <div class="xl:col-span-7 2xl:col-span-8 panel overflow-hidden flex flex-col" style="min-height:660px">
+      <div class="px-4 py-2.5 border-b border-ink-600 flex items-center justify-between flex-wrap gap-2">
+        <div class="panel-title">
+          <i data-lucide="share-2" class="w-3 h-3"></i>Unified Entity Relationship Graph
+          <span class="text-slate-700" id="graphstats"></span>
+        </div>
+        <div class="flex items-center gap-1.5">
+          <button class="btn !p-1.5" id="cy-fit"  title="Fit to view"><i data-lucide="maximize" class="w-3.5 h-3.5"></i></button>
+          <button class="btn !p-1.5" id="cy-in"   title="Zoom in"><i data-lucide="plus" class="w-3.5 h-3.5"></i></button>
+          <button class="btn !p-1.5" id="cy-out"  title="Zoom out"><i data-lucide="minus" class="w-3.5 h-3.5"></i></button>
+          <label class="btn !py-1.5 !px-2 !text-[11px] cursor-pointer" title="Toggle soft (stylometric / circadian / contested) edges">
+            <input type="checkbox" id="cy-soft" checked class="accent-sky-400 w-3 h-3" />
+            Soft links
+          </label>
+        </div>
+      </div>
+      <div class="relative flex-1">
+        <div id="cy"></div>
+        <div id="cyempty" class="hidden absolute inset-0 flex items-center justify-center text-slate-600 text-xs">
+          No entities match the current filter.
+        </div>
+        <div class="absolute bottom-2 left-2 bg-ink-900/90 border border-ink-600 rounded-md p-2 pointer-events-none">
+          <div class="text-[8.5px] text-slate-600 tracking-widest mb-1">NODE TYPES</div>
+          <div class="grid grid-cols-2 gap-x-3 gap-y-0.5" id="legend"></div>
+        </div>
+        <div class="absolute bottom-2 right-2 bg-ink-900/90 border border-ink-600 rounded-md p-2 pointer-events-none">
+          <div class="text-[8.5px] text-slate-600 tracking-widest mb-1">EDGE WIDTH ∝ CONFIDENCE</div>
+          <div class="flex items-center gap-1.5">
+            <span class="w-2 h-px bg-slate-500"></span><span class="text-[8.5px] text-slate-500 mono">0.3</span>
+            <span class="w-4 h-[2px] bg-slate-400"></span><span class="text-[8.5px] text-slate-500 mono">0.65</span>
+            <span class="w-6 h-[3px] bg-sky-400"></span><span class="text-[8.5px] text-slate-500 mono">1.0</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- inspector -->
+    <div class="xl:col-span-5 2xl:col-span-4 panel overflow-hidden flex flex-col" style="min-height:660px">
+      <div class="px-4 py-2.5 border-b border-ink-600 flex items-center justify-between">
+        <div class="panel-title">
+          <i data-lucide="scan-eye" class="w-3 h-3"></i>Entity Inspector
+        </div>
+        <span class="text-[9px] text-slate-600 mono" id="insp-id"></span>
+      </div>
+      <div id="inspector" class="flex-1 overflow-y-auto"></div>
+    </div>
+  </section>
+
+  <!-- ===================== PERSONA TABLE ===================== -->
+  <section class="panel overflow-hidden">
+    <div class="px-4 py-2.5 border-b border-ink-600 flex items-center justify-between flex-wrap gap-2">
+      <div class="panel-title">
+        <i data-lucide="table-2" class="w-3 h-3"></i>Tracked Persona Registry
+        <span class="text-slate-700" id="tabcount"></span>
+      </div>
+      <div class="text-[10px] text-slate-500 flex items-center gap-3">
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-rose-500"></span>&gt;0.90</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-amber-500"></span>0.80–0.90</span>
+        <span class="flex items-center gap-1"><span class="w-2 h-2 rounded-full bg-sky-500"></span>&lt;0.80</span>
+      </div>
+    </div>
+    <div class="overflow-auto" style="max-height:420px">
+      <table class="tbl w-full">
+        <thead><tr id="thead"></tr></thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ===================== METHODOLOGY ===================== -->
+  <section class="panel p-4">
+    <div class="panel-title mb-3"><i data-lucide="flask-conical" class="w-3 h-3"></i>Scoring Methodology &amp; Analyst Policy</div>
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-[11.5px] leading-relaxed" id="methodology"></div>
+  </section>
+</main>
+
+<footer class="px-5 py-4 border-t border-ink-600/60 text-[10px] text-slate-600 mono flex items-center justify-between flex-wrap gap-2">
+  <span>ANVAYA · Smart India Hackathon 2026 · Problem Statement 26151</span>
+  <span id="foot-meta"></span>
+</footer>
+
+<!-- ===================== SANDBOX MODAL ===================== -->
+<div id="sandbox" class="hidden fixed inset-0 z-50 bg-black/80 backdrop-blur-sm overflow-y-auto p-4">
+  <div class="max-w-6xl mx-auto my-4 panel">
+    <div class="px-5 py-3 border-b border-ink-600 flex items-center justify-between">
+      <div class="flex items-center gap-2.5">
+        <div class="w-8 h-8 rounded-md border border-alert-500/40 bg-alert-500/10 flex items-center justify-center">
+          <i data-lucide="scan-search" class="w-4 h-4 text-alert-400"></i>
+        </div>
+        <div>
+          <div class="text-alert-400 font-semibold text-[13px] tracking-wide">DE-ANONYMIZE NEW SAMPLE</div>
+          <div class="text-[9.5px] text-slate-500 mono">Live stylometry · circadian · selector correlation · explainable attribution</div>
+        </div>
+      </div>
+      <button class="btn !p-1.5" onclick="closeSandbox()"><i data-lucide="x" class="w-4 h-4"></i></button>
+    </div>
+
+    <div class="p-5 grid grid-cols-1 lg:grid-cols-2 gap-5">
+      <!-- input -->
+      <div class="space-y-3">
+        <div>
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block flex items-center justify-between">
+            <span>Darknet post / sample text</span>
+            <span class="mono text-slate-600" id="smp-chars">0 chars</span>
+          </label>
+          <textarea id="smp-text" rows="11" class="inp mono !text-[11.5px] leading-relaxed"
+            placeholder="Paste a forum post, vendor listing, negotiation message or leak note…"></textarea>
+        </div>
+
+        <div>
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block">Load a preset sample</label>
+          <div class="flex flex-col gap-1.5" id="smp-presets"></div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div class="grid grid-cols-1 gap-2.5">
+          <div>
+            <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block flex items-center gap-1.5">
+              <i data-lucide="key-round" class="w-3 h-3"></i>PGP fingerprint or subkey <span class="text-slate-700 normal-case">optional</span>
+            </label>
+            <input type="text" id="smp-pgp" class="inp mono !text-[11px]" placeholder="40-char fingerprint or 40-char subkey" />
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block flex items-center gap-1.5">
+              <i data-lucide="wallet" class="w-3 h-3"></i>Bitcoin / Monero address <span class="text-slate-700 normal-case">optional</span>
+            </label>
+            <input type="text" id="smp-wallet" class="inp mono !text-[11px]" placeholder="bc1q… or 4…" />
+          </div>
+          <div>
+            <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1 block flex items-center gap-1.5">
+              <i data-lucide="globe" class="w-3 h-3"></i>.onion service / cert serial / favicon mmh3 <span class="text-slate-700 normal-case">optional</span>
+            </label>
+            <input type="text" id="smp-onion" class="inp mono !text-[11px]" placeholder="…onion  |  8D:31:6F:45:2B:90  |  0x1D6E90A5" />
+          </div>
+        </div>
+
+        <div>
+          <label class="text-[10px] text-slate-500 uppercase tracking-wider mb-1.5 block flex items-center justify-between">
+            <span class="flex items-center gap-1.5"><i data-lucide="clock-4" class="w-3 h-3"></i>Posting hours (UTC)</span>
+            <span class="mono text-slate-600" id="smp-hcount">0 selected</span>
+          </label>
+          <div class="grid grid-cols-12 gap-1" id="smp-hours"></div>
+          <div class="flex gap-1.5 mt-2">
+            <button class="btn !py-1 !px-2 !text-[10px]" onclick="fillHours('ledger')">Ledger window</button>
+            <button class="btn !py-1 !px-2 !text-[10px]" onclick="fillHours('vexel')">Vexel window</button>
+            <button class="btn !py-1 !px-2 !text-[10px]" onclick="clearHours()">Clear</button>
+          </div>
+        </div>
+
+        <button class="btn btn-alert w-full justify-center !py-2.5" id="smp-run" onclick="runAnalysis()">
+          <i data-lucide="crosshair" class="w-4 h-4"></i>Run Attribution Analysis
+        </button>
+      </div>
+
+      <!-- results -->
+      <div id="smp-results" class="min-h-[400px]">
+        <div class="h-full min-h-[400px] flex flex-col items-center justify-center text-center p-6">
+          <div class="w-14 h-14 rounded-xl border border-ink-600 bg-ink-800 flex items-center justify-center mb-3">
+            <i data-lucide="fingerprint" class="w-7 h-7 text-slate-600"></i>
+          </div>
+          <div class="text-slate-400 text-[13px] font-medium">Awaiting sample</div>
+          <div class="text-slate-600 text-[11px] mt-1.5 max-w-sm leading-relaxed">
+            Paste a post, attach a selector, or load a preset. The engine runs character
+            2–4 gram TF-IDF, word TF-IDF, orthographic habit vectors, punctuation layout
+            and 24-hour circadian phase correlation, then fuses them into an explainable
+            attribution score.
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* ==================================================================
+   ANVAYA DASHBOARD  —  vanilla JS, no build step
+   ================================================================== */
+'use strict';
+
+const S = {
+  meta:null, kpis:null, actors:[], graph:null, resolution:null,
+  filters:{ category:[], source:[], min_confidence:0, start_date:'', end_date:'',
+            q:'', actor_only:false },
+  selected:null, sortKey:'confidence', sortDir:-1, cy:null, cySoft:true,
+  charts:{}, hours:new Set(), lastResult:null,
+};
+
+const $  = (s,r=document)=>r.querySelector(s);
+const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+const esc = s => String(s??'').replace(/[&<>"']/g, c =>
+  ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct = v => (Math.round((v??0)*1000)/10).toFixed(1)+'%';
+const icons = () => window.lucide && lucide.createIcons();
+
+function bandColor(c){
+  if(c>=0.90) return '#f43f5e';
+  if(c>=0.80) return '#f59e0b';
+  return '#38bdf8';
+}
+function verdictColor(v){
+  return ({
+    CONFIRMED:'#34d399', ASSESSED:'#22d3ee', PROBABLE_SOFT:'#a78bfa',
+    LEAD:'#f59e0b', WEAK:'#fb923c', INCONCLUSIVE:'#94a3b8', NO_MATCH:'#64748b'
+  })[v] || '#94a3b8';
+}
+const CHANNEL_LABEL = {
+  stylometric:'Stylometric similarity', formatting:'Structural formatting',
+  circadian:'Circadian overlap', crypto:'Cryptographic selector reuse',
+  infrastructure:'Infrastructure correlation'
+};
+const CHANNEL_ICON = {
+  stylometric:'fingerprint', formatting:'text-cursor-input',
+  circadian:'clock-4', crypto:'key-round', infrastructure:'server'
+};
+
+/* ----------------------------- boot ----------------------------- */
+async function boot(){
+  const steps = [
+    ['handshaking with intel core…',            14],
+    ['loading synthetic threat corpus…',        32],
+    ['vectorising stylometry profiles…',        54],
+    ['calibrating cross-actor impostor null…',  72],
+    ['resolving identity clusters…',            88],
+    ['rendering relationship graph…',           100],
+  ];
+  let i = 0;
+  const tick = () => {
+    if(i < steps.length){
+      $('#bootbar').style.width = steps[i][1]+'%';
+      $('#bootmsg').textContent = steps[i][0];
+      i++; setTimeout(tick, 190);
+    }
+  };
+  tick();
+
+  const missing = [];
+  if(!window.cytoscape) missing.push('Cytoscape.js');
+  if(!window.Chart)    missing.push('Chart.js');
+  if(missing.length) $('#cdnwarn').classList.remove('hidden');
+
+  try{
+    const [meta,kpis,actors,graph] = await Promise.all([
+      getJSON('/api/meta'), getJSON('/api/kpis'),
+      getJSON('/api/actors'), getJSON('/api/graph')
+    ]);
+    S.meta=meta; S.kpis=kpis; S.actors=actors.personas; S.graph=graph;
+    S.resolution = meta.cluster_resolution;
+    $('#corpusver').textContent = 'corpus '+meta.corpus_version;
+    $('#foot-meta').textContent =
+      `${kpis.posts_corpus} posts · ${kpis.selectors_tracked} selectors · `+
+      `${kpis.onion_services} onion services · generated ${kpis.generated_at}`;
+
+    buildFilters(meta, actors.markets);
+    renderKPIs(kpis);
+    renderMergeStrip(kpis);
+    renderMethodology(meta);
+    buildHourPicker();
+    buildPresets();
+    initGraph(graph);
+    renderTable();
+    renderInspector(null);
+    startClock();
+    $('#boot').classList.add('opacity-0','pointer-events-none');
+    setTimeout(()=>$('#boot').remove(), 320);
+    if(actors.personas.length) openPersona(actors.personas[0].id);
+  }catch(err){
+    $('#bootmsg').innerHTML =
+      `<span class="text-alert-400">FAILED: ${esc(err.message)}</span>`;
+    console.error(err);
+  }
+  icons();
+}
+
+async function getJSON(url){
+  const r = await fetch(url);
+  if(!r.ok) throw new Error(`${url} → ${r.status}`);
+  return r.json();
+}
+
+function startClock(){
+  setInterval(()=>{
+    const d = new Date();
+    $('#clock').textContent = d.toISOString().slice(11,19)+' UTC';
+  }, 1000);
+}
+
+/* ----------------------------- KPIs ----------------------------- */
+function renderKPIs(k){
+  const cards = [
+    { label:'Tracked personas',   value:k.total_personas, icon:'users',
+      sub:`across ${k.total_clusters} resolved clusters`, color:'#38bdf8' },
+    { label:'Clearnet resolutions', value:k.clearnet_links, icon:'globe',
+      sub:`${k.clearnet_ips.length} unique origin IPs / RFC-5737`, color:'#fb923c' },
+    { label:'Cross-market mergers', value:k.cross_market_merges, icon:'git-merge',
+      sub:k.merges.map(m=>m.cluster.split(' ')[0]).join(' · ') || '—', color:'#a78bfa' },
+    { label:'High-confidence attributions', value:`${k.high_confidence}/${k.total_personas}`,
+      icon:'badge-check',
+      sub:`>85% · ${k.hard_selector_links} hard-selector link, `+
+          `${k.soft_capped_clusters.length} soft-capped`, color:'#34d399' },
+  ];
+  $('#kpis').innerHTML = cards.map(c=>`
+    <div class="panel kpi p-4">
+      <div class="flex items-start justify-between gap-2">
+        <div class="panel-title"><i data-lucide="${c.icon}" class="w-3 h-3"></i>${esc(c.label)}</div>
+        <i data-lucide="${c.icon}" class="w-4 h-4 opacity-25" style="color:${c.color}"></i>
+      </div>
+      <div class="text-3xl font-bold mt-2.5 leading-none" style="color:${c.color}">${esc(c.value)}</div>
+      <div class="text-[10px] text-slate-500 mt-2 leading-snug">${esc(c.sub)}</div>
+    </div>`).join('');
+  icons();
+}
+
+function renderMergeStrip(k){
+  if(!k.merges.length) return;
+  const el = $('#mergestrip');
+  el.classList.remove('hidden');
+  el.innerHTML = `<div class="panel p-3.5">
+    <div class="panel-title mb-2.5">
+      <i data-lucide="git-merge" class="w-3 h-3"></i>Cross-Market Identity Resolution
+      <span class="text-slate-700">— one human, two handles, two markets</span>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+    ${k.merges.map(m=>{
+      const soft = m.method === 'SOFT_MERGE';
+      return `<div class="rounded-lg border p-3 ${
+        soft ? 'border-amber-500/25 bg-amber-500/5' : 'border-emerald-500/25 bg-emerald-500/5'}">
+        <div class="flex items-center justify-between gap-2 mb-1.5">
+          <span class="text-[12px] font-semibold ${soft?'text-amber-300':'text-emerald-300'}">
+            ${esc(m.cluster)}</span>
+          <span class="tag ${soft?'bg-amber-500/15 text-amber-400':'bg-emerald-500/15 text-emerald-400'}">
+            ${soft?'BEHAVIOURAL ONLY':'HARD SELECTOR'}</span>
+        </div>
+        <div class="flex items-center gap-2 text-[11px] text-slate-300 flex-wrap">
+          <span class="mono">${esc(m.personas[0])}</span>
+          <i data-lucide="${soft?'pencil-ruler':'arrow-right'}" class="w-3 h-3 ${soft?'text-amber-400':'text-emerald-400'}"></i>
+          <span class="mono">${esc(m.personas[1])}</span>
+        </div>
+        <div class="text-[10px] text-slate-500 mt-1.5">
+          ${esc(m.venues.join('  →  '))} · cluster confidence ${pct(m.confidence)}
+        </div>
+      </div>`;}).join('')}
+    </div></div>`;
+  icons();
+}
+
+/* ----------------------------- filters ----------------------------- */
+function buildFilters(meta, markets){
+  $('#f-category').innerHTML = meta.categories.map(c=>
+    `<span class="chip" data-cat="${esc(c)}">${esc(c)}</span>`).join('');
+  $('#f-source').innerHTML = markets.map(m=>
+    `<span class="chip" data-src="${esc(m.id)}" title="${esc(m.kind)} · ${esc(m.status)}">${esc(m.name)}</span>`).join('');
+
+  $$('#f-category .chip').forEach(c=>c.onclick=()=>{
+    const v=c.dataset.cat, f=S.filters.category;
+    const i=f.indexOf(v); i<0?f.push(v):f.splice(i,1);
+    c.classList.toggle('on'); refresh();
+  });
+  $$('#f-source .chip').forEach(c=>c.onclick=()=>{
+    const v=c.dataset.src, f=S.filters.source;
+    const i=f.indexOf(v); i<0?f.push(v):f.splice(i,1);
+    c.classList.toggle('on'); refresh();
+  });
+
+  const lo = meta.date_bounds.min, hi = meta.date_bounds.max;
+  const sd=$('#f-start'), ed=$('#f-end');
+  sd.min=lo; sd.max=hi; ed.min=lo; ed.max=hi;
+  sd.value=S.filters.start_date; ed.value=S.filters.end_date;
+  sd.onchange=()=>{S.filters.start_date=sd.value; refresh();};
+  ed.onchange=()=>{S.filters.end_date=ed.value; refresh();};
+
+  const cf=$('#f-conf');
+  cf.oninput=()=>{ $('#confval').textContent=cf.value+'%';
+                   S.filters.min_confidence=cf.value/100; };
+  cf.onchange=refresh;
+
+  let t; const q=$('#f-q');
+  q.oninput=()=>{ clearTimeout(t); t=setTimeout(()=>{S.filters.q=q.value; refresh();}, 280); };
+
+  $('#f-actoronly').onchange = e => { S.filters.actor_only = e.target.checked; refresh(); };
+}
+
+function resetFilters(){
+  S.filters={category:[],source:[],min_confidence:0,start_date:'',end_date:'',q:'',actor_only:false};
+  $$('.chip').forEach(c=>c.classList.remove('on'));
+  $('#f-conf').value=0; $('#confval').textContent='0%';
+  $('#f-q').value=''; $('#f-start').value=''; $('#f-end').value='';
+  $('#f-actoronly').checked=false;
+  refresh();
+}
+
+function qs(){
+  const f=S.filters, p=new URLSearchParams();
+  if(f.category.length)      p.set('category', f.category.join(','));
+  if(f.source.length)        p.set('source',   f.source.join(','));
+  if(f.min_confidence>0)     p.set('min_confidence', f.min_confidence);
+  if(f.start_date)           p.set('start_date', f.start_date);
+  if(f.end_date)             p.set('end_date',   f.end_date);
+  if(f.q)                    p.set('q', f.q);
+  if(f.actor_only)           p.set('actor_only', 'true');
+  return p.toString();
+}
+
+async function refresh(){
+  const q = qs();
+  try{
+    const [a,g] = await Promise.all([
+      getJSON('/api/actors'+(q?'?'+q:'')),
+      getJSON('/api/graph'+(q?'?'+q:'')),
+    ]);
+    S.actors=a.personas; S.kpis=a.kpis; S.graph=g;
+    renderKPIs(a.kpis); renderTable(); setGraph(g);
+    if(S.actors.length){
+      if(!S.actors.find(p=>p.id===S.selected)) openPersona(S.actors[0].id);
+      else openPersona(S.actors.find(p=>p.id===S.selected).handle);
+    } else {
+      S.selected=null; renderInspector(null);
+    }
+  }catch(e){ console.error(e); toast('Filter failed: '+e.message,'error'); }
+}
+
+function exportAs(fmt){
+  const q=qs();
+  const url = fmt==='report' ? `/api/export/report${q?'?'+q:''}`
+                              : `/api/export/${fmt}${q?'?'+q:''}`;
+  if(fmt==='report'){
+    const w = window.open(url,'_blank');
+    if(!w) toast('Popup blocked — allow popups to open the dossier','error');
+    else toast('Dossier opened — use your browser to Print → Save as PDF','ok');
+  } else {
+    const a=document.createElement('a');
+    a.href=url; a.download=''; document.body.appendChild(a); a.click(); a.remove();
+    toast(`${fmt.toUpperCase()} export downloaded`,'ok');
+  }
+}
+
+/* ----------------------------- graph ----------------------------- */
+function initGraph(g){
+  if(!window.cytoscape){
+    $('#cy').innerHTML =
+      '<div class="h-full flex items-center justify-center text-slate-600 text-xs">'+
+      'Cytoscape.js unavailable (no network). API remains fully functional.</div>';
+    return;
+  }
+  S.cy = cytoscape({
+    container:$('#cy'), elements:cyElements(g),
+    wheelSensitivity:0.22, minZoom:0.12, maxZoom:3.4,
+    style:[
+      { selector:'node', style:{
+          'background-color':'data(color)', label:'data(label)',
+          'font-size':'9px', color:'#cbd5e1', 'text-valign':'center',
+          'text-halign':'center', 'text-margin-y':'2px',
+          width:'mapData(size, 18, 70, 14, 60)',
+          'border-width':'mapData(confidence, 0, 1, 0, 2)',
+          'border-color':'#0b0f17',
+          'text-outline-color':'#05070d', 'text-outline-width':'2.5px' } },
+      { selector:'node[type="ThreatActor"]', style:{
+          shape:'round-rectangle', 'font-size':'11px', 'font-weight':'700',
+          color:'#fff', 'text-valign':'center', 'text-halign':'center',
+          'text-margin-y':'3px' } },
+      { selector:'node[type="Persona"]', style:{
+          shape:'ellipse', 'text-margin-y':'2px' } },
+      { selector:'node[type="PGPKey"]',      style:{ shape:'round-diamond' } },
+      { selector:'node[type="CryptoWallet"]',style:{ shape:'round-hexagon' } },
+      { selector:'node[type="OnionService"]',style:{ shape:'hexagon' } },
+      { selector:'node[type="ClearnetIP"]',  style:{ shape:'rectangle' } },
+      { selector:'node[type="MessagingID"]', style:{ shape:'round-tag' } },
+      { selector:'node[type="TxCluster"]',   style:{ shape:'round-rectangle',
+                                                    'text-wrap':'wrap','text-max-width':'90px' } },
+      { selector:'node[type="Sample"]',      style:{
+          shape:'star', 'background-color':'#f472b6', color:'#fff', 'font-weight':'700',
+          'font-size':'10px' } },
+      { selector:'node[visible = 0]', style:{ 'display':'none' } },
+      { selector:'edge', style:{
+          'line-color':'data(color)', 'target-arrow-color':'data(color)',
+          width:'data(width)', opacity:'mapData(confidence, 0, 1, 0.18, 0.95)',
+          'curve-style':'bezier', 'target-arrow-shape':'triangle',
+          'arrow-scale':'0.55' } },
+      { selector:'edge[type="STYLOMETRY_LINK"]', style:{ 'line-style':'dashed' } },
+      { selector:'edge[type="CIRCADIAN_LINK"]',  style:{ 'line-style':'dotted' } },
+      { selector:'edge[type="INFRA_MATCH_CONTESTED"]', style:{
+          'line-style':'dashed', opacity:0.55 } },
+      { selector:'.dim', style:{ opacity:0.14, 'text-opacity':0.14 } },
+      { selector:'.halo', style:{
+          'border-width':'3px', 'border-color':'#38bdf8', 'border-opacity':'0.75' } },
+      { selector:'node:selected', style:{
+          'border-width':'3px','border-color':'#38bdf8' } },
+    ]
+  });
+  S.cy.on('tap','node', ev=>{
+    const n=ev.target, d=n.data();
+    if(d.type==='Persona') openPersona(d.id);
+    else if(d.type==='ThreatActor') openActor(d.id);
+    else renderNodeInfo(d);
+  });
+  S.cy.on('tap', ev=>{ if(ev.target===S.cy) clearHalo(); });
+  S.cy.on('mouseover','node', ev=>{ ev.target.connectedEdges().addClass('dim');
+                                     S.cy.elements().addClass('dim');
+                                     ev.target.closedNeighborhood().removeClass('dim');
+                                     S.cy.nodes().removeClass('dim');
+                                     ev.target.closedNeighborhood().nodes().removeClass('dim'); });
+  S.cy.on('mouseout','node', ()=> S.cy.elements().removeClass('dim'));
+
+  $('#cy-fit').onclick = ()=>S.cy.fit(undefined, 45);
+  $('#cy-in').onclick  = ()=>S.cy.zoom({level:S.cy.zoom()*1.28, renderedPosition:S.cy.extent().w/2+'.px'});
+  $('#cy-out').onclick = ()=>S.cy.zoom({level:S.cy.zoom()/1.28, renderedPosition:S.cy.extent().w/2+'.px'});
+  $('#cy-soft').onchange = e => { S.cySoft = e.target.checked; setGraph(S.graph); };
+  renderLegend();
+}
+
+function cyElements(g){
+  const soft = new Set(['STYLOMETRY_LINK','CIRCADIAN_LINK','INFRA_MATCH_CONTESTED']);
+  const nodes = g.nodes.filter(n=>n.visible!==false);
+  const ids = new Set(nodes.map(n=>n.id));
+  const edges = g.edges.filter(e=>ids.has(e.source)&&ids.has(e.target))
+                        .filter(e=> S.cySoft || !soft.has(e.type));
+  return [...nodes.map(n=>({group:'nodes', data:n})),
+          ...edges.map(e=>({group:'edges', data:e}))];
+}
+
+function setGraph(g){
+  if(!S.cy) return initGraph(g);
+  const pos = {};
+  S.cy.nodes().forEach(n=>pos[n.id()]={x:n.position('x'), y:n.position('y')});
+  S.cy.elements().remove();
+  S.cy.add(cyElements(g));
+  S.cy.nodes().forEach(n=>{ if(pos[n.id()]) n.position(pos[n.id()]); });
+  const soft = new Set(['STYLOMETRY_LINK','CIRCADIAN_LINK','INFRA_MATCH_CONTESTED']);
+  S.cy.edges().forEach(e=>{ if(!S.cySoft && soft.has(e.data('type'))) e.hide(); });
+  $('#graphstats').textContent = ` — ${g.stats.nodes} nodes / ${g.stats.edges} edges`;
+  $('#cyempty').classList.toggle('hidden', g.stats.nodes>0);
+  renderLegend();
+}
+
+function renderLegend(){
+  const types = Object.keys(S.meta.entity_colors)
+    .filter(t=>S.graph.nodes.some(n=>n.type===t));
+  $('#legend').innerHTML = types.map(t=>`
+    <div class="flex items-center gap-1.5">
+      <span class="w-2.5 h-2.5 rounded-sm shrink-0"
+            style="background:${S.meta.entity_colors[t]}"></span>
+      <span class="text-[8.5px] text-slate-500">${esc(t)}</span>
+    </div>`).join('');
+}
+
+function clearHalo(){ S.cy.elements().removeClass('halo'); }
+function halo(id){
+  clearHalo();
+  if(!S.cy) return;
+  const n = S.cy.getElementById(id);
+  if(n && n.length){ n.addClass('halo'); n.closedNeighborhood().nodes().addClass('halo'); }
+}
+
+async function openPersona(id){
+  try{
+    const d = await getJSON('/api/actors/'+encodeURIComponent(id));
+    S.selected = d.persona.id;
+    renderInspector({kind:'persona', ...d});
+    renderTable(); halo(d.persona.id);
+    if(S.cy){
+      const n=S.cy.getElementById(d.persona.id);
+      if(n && n.length) S.cy.animate({center:{eles:n}}, {duration:340});
+    }
+  }catch(e){ toast('Could not load persona: '+e.message,'error'); }
+}
+
+async function openActor(actorId){
+  const members = S.actors.filter(p=>p.actor_id===actorId);
+  if(!members.length){ toast('No personas in view for this cluster','error'); return; }
+  renderInspector({kind:'actor', actorId, members});
+  halo(actorId);
+  if(S.cy) S.cy.nodes().forEach(n=>{
+    n.data('member', n.data('type')==='Persona' && n.data('actor')===actorId);
+  });
+  S.cy.elements().removeClass('dim');
+  S.cy.nodes().forEach(n=>{ if(!n.data('member')) n.addClass('dim'); });
+  S.cy.edges().forEach(e=>{
+    if(!(e.data('source')===actorId || e.data('target')===actorId)) e.addClass('dim');
+  });
+}
+
+function renderNodeInfo(d){
+  const rows = Object.entries(d).filter(([k])=>!['id','type','color','size','visible'].includes(k));
+  $('#inspector').innerHTML = `
+    <div class="p-4 fade-in space-y-3">
+      <div>
+        <div class="tag bg-sky-500/15 text-sky-400 mb-2">${esc(d.type)}</div>
+        <div class="text-neon-400 mono text-[12px] break-all">${esc(d.label||d.value||d.id)}</div>
+      </div>
+      <div class="hr"></div>
+      <div class="space-y-1">
+        ${rows.map(([k,v])=>`<div class="flex justify-between gap-3 text-[11px]">
+          <span class="text-slate-500">${esc(k)}</span>
+          <span class="mono text-slate-300 text-right break-all">${esc(typeof v==='object'?JSON.stringify(v):v)}</span>
+        </div>`).join('')}
+      </div>
+      <button class="btn w-full justify-center" onclick="clearHalo()">Clear highlight</button>
+    </div>`;
+  icons();
+}
+
+/* ----------------------------- inspector ----------------------------- */
+function renderInspector(state){
+  const box = $('#inspector');
+  if(!state){
+    box.innerHTML = `<div class="h-full flex flex-col items-center justify-center text-center p-6">
+      <div class="w-14 h-14 rounded-xl border border-ink-600 bg-ink-800 flex items-center justify-center mb-3">
+        <i data-lucide="mouse-pointer-click" class="w-6 h-6 text-slate-600"></i></div>
+      <div class="text-slate-400 text-[13px] font-medium">No entity selected</div>
+      <div class="text-slate-600 text-[11px] mt-1.5 max-w-[240px] leading-relaxed">
+        Click a node in the graph or a row in the registry to open the inspector.</div>
+    </div>`;
+    $('#insp-id').textContent=''; icons(); return;
+  }
+  if(state.kind==='actor'){ renderActorInspector(state); icons(); return; }
+  renderPersonaInspector(state.persona, state.cluster_siblings);
+  icons();
+}
+
+function renderActorInspector(actor){
+  const actorId = actor.actorId;
+  const members = actor.members || S.actors.filter(p=>p.actor_id===actorId);
+  const name = members[0]?.actor_codename || actorId;
+  const res = (S.resolution.log||[]).filter(l=>l.cluster_id===name);
+  const clusterConf = res.reduce((a,r)=>Math.max(a, r.confidence||0), 0) || members[0]?.confidence || 0;
+  $('#insp-id').textContent = actorId;
+  $('#inspector').innerHTML = `
+    <div class="p-4 space-y-3 fade-in">
+      <div class="flex items-start justify-between gap-2">
+        <div>
+          <div class="tag bg-alert-500/15 text-alert-400 mb-1.5">THREAT ACTOR CLUSTER</div>
+          <div class="text-[15px] font-bold text-alert-400 leading-tight">${esc(name)}</div>
+          <div class="mono text-[10px] text-slate-500 mt-1">${members.length} merged persona(s)</div>
+        </div>
+        ${members.length?confBadge(clusterConf):''}
+      </div>
+      ${res.map(r=>`
+        <div class="rounded-lg border border-amber-500/25 bg-amber-500/5 p-3">
+          <div class="flex items-center gap-2 mb-1.5">
+            <span class="tag ${r.verdict==='CONFIRMED_HARD'
+              ?'bg-emerald-500/15 text-emerald-400':'bg-amber-500/15 text-amber-400'}">${esc(r.verdict)}</span>
+            <span class="mono text-[10px] text-slate-500">${esc(r.method)}</span>
+          </div>
+          <div class="text-[11px] text-slate-400 leading-relaxed">${esc(r.detail)}</div>
+        </div>`).join('')}
+      <div class="hr"></div>
+      <div class="panel-title mb-2">Merged personas</div>
+      <div class="space-y-1.5">
+        ${members.map(m=>`
+          <div class="row-hover rounded-md border border-ink-600 p-2.5 cursor-pointer"
+               onclick="openPersona('${esc(m.handle)}')">
+            <div class="flex items-center justify-between gap-2">
+              <span class="mono text-[12px] text-slate-200">${esc(m.handle)}</span>
+              <span class="mono text-[11px]" style="color:${bandColor(m.confidence)}">${pct(m.confidence)}</span>
+            </div>
+            <div class="text-[10px] text-slate-500 mt-1">${esc(m.source_name)} · ${esc(m.status)}</div>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+function confBadge(c){
+  const col = bandColor(c);
+  return `<div class="text-right shrink-0">
+    <div class="text-xl font-bold leading-none" style="color:${col}">${pct(c)}</div>
+    <div class="text-[9px] text-slate-500 mt-1">CONFIDENCE</div></div>`;
+}
+
+function gaugeSvg(score, verdict){
+  const R=54, C=2*Math.PI*R, off = C*(1-Math.min(score,1));
+  const col = verdictColor(verdict);
+  return `<svg viewBox="0 0 140 140" class="w-full" style="max-width:170px">
+    <circle class="gauge-track" cx="70" cy="70" r="${R}" fill="none" stroke-width="10"/>
+    <circle cx="70" cy="70" r="${R}" fill="none" stroke="${col}" stroke-width="10"
+            stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${off}"
+            transform="rotate(-90 70 70)" style="transition:stroke-dashoffset .7s"/>
+    <text x="70" y="66" text-anchor="middle" font-size="27" font-weight="700"
+          fill="${col}" font-family="JetBrains Mono,monospace">${pct(score)}</text>
+    <text x="70" y="84" text-anchor="middle" font-size="8.5" fill="#64748b"
+          letter-spacing="1.6">ATTRIBUTION</text>
+  </svg>`;
+}
+
+function renderPersonaInspector(p, siblings){
+  $('#insp-id').textContent = p.id;
+  const hist = p.hour_histogram || [];
+  const peak = hist.indexOf(Math.max(...hist));
+  const contested = p.evidence.filter(e=>e.similarity>0 && e.similarity<0.5);
+  const svc = (p.onion_services||[])[0];
+
+  $('#inspector').innerHTML = `
+  <div class="p-4 space-y-4 fade-in">
+
+    <!-- header -->
+    <div>
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="flex items-center gap-1.5 flex-wrap mb-1.5">
+            <span class="tag" style="background:${(S.meta.category_colors[p.category]||'#38bdf8')}22;
+                  color:${S.meta.category_colors[p.category]||'#38bdf8'}">${esc(p.category)}</span>
+            <span class="tag bg-ink-500 text-slate-400">${esc(p.source_name)}</span>
+            <span class="tag bg-ink-500 text-slate-500">${esc(p.threat_level)}</span>
+          </div>
+          <div class="text-[17px] font-bold text-slate-100 mono break-all leading-tight">
+            ${esc(p.handle)}</div>
+          <div class="text-[11px] text-alert-400 mt-1 flex items-center gap-1.5">
+            <i data-lucide="crosshair" class="w-3 h-3"></i>${esc(p.actor_codename)}
+            ${p.resolution_method==='SOFT_MERGE'
+              ? '<span class="tag bg-amber-500/15 text-amber-400">SOFT MERGE</span>' : ''}
+          </div>
+        </div>
+        ${confBadge(p.confidence)}
+      </div>
+      <div class="scan mt-3"><i style="width:${p.confidence*100}%;
+        background:linear-gradient(90deg,${bandColor(p.confidence)}55,${bandColor(p.confidence)})"></i></div>
+      <div class="text-[10px] text-slate-500 mt-2 leading-relaxed">${esc(p.bio)}</div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-2 text-[10px]">
+      ${[['Role',p.role],['Status',p.status],['Language',p.language],
+         ['Assessed origin',p.geo_assumed],['First seen',p.first_seen],
+         ['Last scan',p.last_scan_date],['Posts',p.post_count],
+         ['Peak activity',String(peak).padStart(2,'0')+':00 UTC']]
+        .map(([k,v])=>`
+        <div class="bg-ink-800 border border-ink-600 rounded-md px-2.5 py-1.5">
+          <div class="text-slate-600 text-[8.5px] uppercase tracking-wider">${esc(k)}</div>
+          <div class="text-slate-300 mt-0.5 truncate" title="${esc(v)}">${esc(v)}</div>
+        </div>`).join('')}
+    </div>
+
+    <!-- evidence breakdown -->
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="bar-chart-3" class="w-3 h-3"></i>Explainable Evidence Breakdown
+      </div>
+      <div class="space-y-1.5">
+        ${p.evidence.length ? p.evidence.map(e=>{
+          const sim=Math.max(e.similarity,0);
+          const col = sim===0 ? '#334155' : sim<0.5 ? '#f59e0b' : bandColor(sim);
+          return `
+          <div class="group">
+            <div class="flex items-center justify-between gap-2 text-[10.5px] mb-1">
+              <span class="text-slate-400 truncate flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:${col}"></span>
+                ${esc(e.label)}</span>
+              <span class="mono shrink-0" style="color:${col}">${pct(sim)}</span>
+            </div>
+            <div class="scan"><i style="width:${sim*100}%;background:${col}"></i></div>
+            <div class="text-[9.5px] text-slate-600 mt-1 leading-relaxed hidden group-hover:block">
+              ${esc(e.detail)}</div>
+          </div>`;}).join('')
+        : '<div class="text-[11px] text-slate-600">No evidence records.</div>'}
+      </div>
+      ${contested.length ? `
+        <div class="mt-2.5 rounded-md border border-amber-500/30 bg-amber-500/5 p-2.5">
+          <div class="flex items-center gap-1.5 text-[10px] text-amber-400 font-semibold mb-1">
+            <i data-lucide="alert-triangle" class="w-3 h-3"></i>CONTESTED SIGNAL — NOT A MATCH
+          </div>
+          <div class="text-[10px] text-slate-500 leading-relaxed">
+            ${esc(contested[0].detail)}</div>
+        </div>` : ''}
+    </div>
+
+    <!-- infrastructure -->
+    ${(p.onion_services||[]).length ? `
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="server" class="w-3 h-3"></i>Infrastructure Correlation
+      </div>
+      <div class="space-y-2">
+        ${p.onion_services.map(s=>`
+          <div class="rounded-lg border border-ink-600 bg-ink-800 p-2.5">
+            <div class="mono text-[10px] text-purple-300 break-all">${esc(s.address)}</div>
+            <div class="text-[10.5px] text-slate-400 mt-1 mb-2">${esc(s.title)}</div>
+            <div class="space-y-1">
+              ${[['TLS serial',s.cert_serial],['Cert SHA-256',(s.cert_sha256||'').slice(0,29)+'…'],
+                 ['favicon mmh3',s.favicon_mmh3],['Server header',s.server_header]]
+                .map(([k,v])=>`
+                <div class="flex justify-between gap-2 text-[10px]">
+                  <span class="text-slate-600 shrink-0">${esc(k)}</span>
+                  <span class="mono text-slate-300 text-right break-all">${esc(v||'—')}</span>
+                </div>`).join('')}
+            </div>
+            <div class="mt-2 pt-2 border-t border-ink-600 flex items-center justify-between">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <i data-lucide="network" class="w-3 h-3 text-orange-400 shrink-0"></i>
+                <span class="mono text-[10.5px] text-orange-300">${esc(s.origin_ip)}</span>
+                <span class="tag bg-orange-500/15 text-orange-400">${esc(s.origin_asn)}</span>
+              </div>
+              <span class="mono text-[10px]" style="color:${bandColor(s.confidence)}">${pct(s.confidence)}</span>
+            </div>
+            <div class="text-[9.5px] text-slate-600 mt-1">${esc(s.origin_org)} · ${esc(s.origin_country)}
+              · /server-status ${s.server_status?'<span class="text-amber-400">OPEN</span>':'closed'}
+              · ${s.power_on_hours}h/day</div>
+          </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- circadian -->
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="clock-4" class="w-3 h-3"></i>24-Hour UTC Activity Profile
+        ${(siblings||[]).length ? '<span class="text-slate-700">— overlaid on cluster sibling</span>' : ''}
+      </div>
+      <div style="height:200px"><canvas id="c-circ"></canvas></div>
+      <div class="text-[9.5px] text-slate-600 mt-1.5">
+        Bin = number of posts observed in that UTC hour. A body clock survives an account
+        re-registration; that is the whole premise of this vector.</div>
+    </div>
+
+    <!-- selectors -->
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="fingerprint" class="w-3 h-3"></i>Tracked Selectors
+        <span class="text-slate-700">${(p.selectors||[]).length}</span>
+      </div>
+      <div class="space-y-1">
+        ${(p.selectors||[]).map(s=>`
+          <div class="flex items-start gap-2 bg-ink-800 border border-ink-600 rounded-md px-2.5 py-1.5">
+            <span class="tag bg-ink-600 text-slate-400 shrink-0 mt-0.5">${esc(s.type)}</span>
+            <span class="mono text-[10px] text-slate-300 break-all min-w-0">${esc(s.value)}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <!-- clearnet -->
+    ${(p.clearnet_pivots||[]).length ? `
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="unlink" class="w-3 h-3"></i>Clearnet De-anonymization Path
+      </div>
+      <div class="space-y-1.5">
+        ${p.clearnet_pivots.map(c=>`
+          <div class="rounded-md border border-ink-600 bg-ink-800 p-2.5">
+            <div class="text-[10px] text-slate-500">${esc(c.source)}</div>
+            <div class="mono text-[10px] text-slate-300 mt-1 break-all">${esc(c.pivot)}</div>
+            <div class="flex items-center gap-1.5 mt-1.5">
+              <i data-lucide="arrow-down" class="w-3 h-3 text-slate-600 shrink-0"></i>
+              <span class="text-[10.5px] text-orange-300 mono break-all">${esc(c.artifact)}</span>
+            </div>
+            <div class="flex items-center gap-2 mt-1.5">
+              <div class="scan flex-1"><i style="width:${c.confidence*100}%;
+                background:${bandColor(c.confidence)}"></i></div>
+              <span class="mono text-[9.5px]" style="color:${bandColor(c.confidence)}">${pct(c.confidence)}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- posts -->
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="message-square" class="w-3 h-3"></i>Corpus Post Samples
+      </div>
+      <div class="space-y-1.5">
+        ${(p.posts||[]).slice(0,3).map(t=>`
+          <details class="rounded-md border border-ink-600 bg-ink-800 overflow-hidden">
+            <summary class="px-2.5 py-1.5 text-[10px] text-slate-500 cursor-pointer hover:text-slate-300 mono">
+              ${esc(t.posted_at)} · ${esc(t.channel)} · ${String(t.utc_hour).padStart(2,'0')}:00 UTC
+            </summary>
+            <div class="px-2.5 pb-2.5 text-[10.5px] text-slate-400 leading-relaxed whitespace-pre-line
+                        border-t border-ink-600 pt-2">${esc(t.body)}</div>
+          </details>`).join('')}
+      </div>
+    </div>
+
+    <button class="btn w-full justify-center" onclick="openSandbox('${esc(p.handle)}')">
+      <i data-lucide="scan-search" class="w-3.5 h-3.5"></i>Run a new sample against this persona
+    </button>
+  </div>`;
+
+  drawCircadian(p, siblings||[]);
+}
+
+function drawCircadian(p, siblings){
+  if(!window.Chart) return;
+  const c=$('#c-circ'); if(!c) return;
+  if(S.charts.circ) S.charts.circ.destroy();
+  const ds=[{label:p.handle, data:p.hour_histogram, borderColor:'#38bdf8',
+             backgroundColor:'rgba(56,189,248,.22)', borderWidth:2, fill:true,
+             pointRadius:0, tension:.3}];
+  const palette=['#f43f5e','#f59e0b','#a855f7','#34d399'];
+  siblings.forEach((s,i)=>ds.push({label:s.handle, data:s.hour_histogram,
+    borderColor:palette[i%4], backgroundColor:palette[i%4]+'18', borderWidth:1.6,
+    borderDash:[4,3], fill:false, pointRadius:0, tension:.3}));
+  S.charts.circ = new Chart(c, { type:'bar',
+    data:{labels:Array.from({length:24},(_,i)=>String(i).padStart(2,'0')),
+          datasets:ds},
+    options:{ responsive:true, maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{ legend:{display:siblings.length>0, labels:{color:'#94a3b8',
+                  boxWidth:9, boxHeight:9, font:{size:9, family:'JetBrains Mono'}}},
+                tooltip:{backgroundColor:'#0d1420', borderColor:'#1c2636', borderWidth:1,
+                  titleColor:'#e2e8f0', bodyColor:'#94a3b8', font:{size:10}}},
+      scales:{ x:{ grid:{color:'#0d1420'}, ticks:{color:'#475569', font:{size:8}}},
+               y:{ beginAtZero:true, grid:{color:'#0d1420'},
+                   ticks:{color:'#475569', font:{size:8}, precision:0} } } } });
+}
+
+/* ----------------------------- registry table ----------------------------- */
+const COLS=[
+  {k:'handle',       t:'Handle',       w:''},
+  {k:'actor',        t:'Actor cluster',w:''},
+  {k:'source',       t:'Venue',        w:''},
+  {k:'category',     t:'Category',     w:''},
+  {k:'confidence',   t:'Confidence',   w:''},
+  {k:'first_seen',   t:'First seen',   w:''},
+  {k:'last_scan_date',t:'Last scan',   w:''},
+  {k:'selectors',    t:'Sel.',         w:'text-right'},
+  {k:'onion_services',t:'Onion',       w:'text-right'},
+  {k:'status',       t:'Status',       w:''},
+];
+
+function renderTable(){
+  $('#thead').innerHTML = COLS.map(c=>
+    `<th data-k="${c.k}" class="${c.w}">${esc(c.t)}${
+      S.sortKey===c.k?`<span class="text-neon-400"> ${S.sortDir<0?'▾':'▴'}</span>`:''}</th>`).join('');
+  $$('#thead th').forEach(th=>th.onclick=()=>{
+    const k=th.dataset.k;
+    if(S.sortKey===k) S.sortDir*=-1; else {S.sortKey=k; S.sortDir=-1;}
+    renderTable();
+  });
+
+  const rows=[...S.actors].sort((a,b)=>{
+    let x=a[S.sortKey], y=b[S.sortKey];
+    if(S.sortKey==='actor'){x=a.actor_codename; y=b.actor_codename;}
+    if(S.sortKey==='source'){x=a.source_name; y=b.source_name;}
+    if(typeof x==='string') return x.localeCompare(y)*S.sortDir;
+    return ((x??0)-(y??0))*S.sortDir;
+  });
+  $('#tabcount').textContent = ` — ${rows.length} record${rows.length===1?'':'s'}`;
+  $('#matchcount').textContent = `${rows.length} of ${S.kpis?.total_personas??'?'} personas matched`;
+
+  $('#tbody').innerHTML = rows.length ? rows.map(p=>{
+    const col = S.meta.category_colors[p.category]||'#38bdf8';
+    return `<tr data-id="${esc(p.id)}" class="${p.id===S.selected?'sel':''}">
+      <td class="mono text-slate-100 font-medium">${esc(p.handle)}
+        ${p.rebrand_of?'<span class="tag bg-purple-500/15 text-purple-400 ml-1">REBRAND</span>':''}</td>
+      <td class="text-alert-400/90 text-[11px]">${esc(p.actor_codename)}</td>
+      <td class="text-slate-400 text-[11px]">${esc(p.source_name)}</td>
+      <td><span class="tag" style="background:${col}22;color:${col}">${esc(p.category)}</span></td>
+      <td>
+        <div class="flex items-center gap-2">
+          <span class="mono w-10 text-right" style="color:${bandColor(p.confidence)}">${pct(p.confidence)}</span>
+          <div class="scan w-14"><i style="width:${p.confidence*100}%;background:${bandColor(p.confidence)}"></i></div>
+        </div>
+      </td>
+      <td class="mono text-slate-500 text-[10.5px]">${esc(p.first_seen)}</td>
+      <td class="mono text-slate-500 text-[10.5px]">${esc(p.last_scan_date)}</td>
+      <td class="mono text-slate-400 text-right">${(p.selectors||[]).length}</td>
+      <td class="mono text-slate-400 text-right">${(p.onion_services||[]).length}</td>
+      <td class="text-slate-400 text-[10.5px]">${esc(p.status)}</td>
+    </tr>`;}).join('')
+    : `<tr><td colspan="${COLS.length}" class="text-center text-slate-600 py-8 text-xs">
+         No personas match the current filter.</td></tr>`;
+
+  $$('#tbody tr[data-id]').forEach(tr=>tr.onclick=()=>openPersona(tr.dataset.id));
+}
+
+function renderMethodology(meta){
+  const m=meta.methodology;
+  const cw=m.channel_weights;
+  $('#methodology').innerHTML = `
+    <div>
+      <div class="panel-title mb-2"><i data-lucide="sigma" class="w-3 h-3"></i>Fusion model</div>
+      <div class="mono text-[11px] text-neon-400 bg-ink-800 border border-ink-600 rounded-md p-2 mb-2">
+        Score = 1 − ∏(1 − w<sub>i</sub> · s<sub>i</sub>)</div>
+      <div class="text-slate-400">applied across five evidence channels. Channel priors:</div>
+      <div class="mt-2 space-y-1">
+        ${Object.entries(cw).map(([k,v])=>`
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-slate-400">${esc(CHANNEL_LABEL[k]||k)}</span>
+            <span class="flex items-center gap-2">
+              <span class="scan w-16"><i style="width:${v*100}%;background:#38bdf8"></i></span>
+              <span class="mono text-slate-300 w-8 text-right">${v.toFixed(2)}</span>
+            </span>
+          </div>`).join('')}
+      </div>
+    </div>
+    <div>
+      <div class="panel-title mb-2"><i data-lucide="target" class="w-3 h-3"></i>Calibration</div>
+      <div class="text-slate-400 leading-relaxed">${esc(m.calibration)}</div>
+      <div class="text-slate-400 leading-relaxed mt-2">${esc(m.missing_feature_policy)}</div>
+    </div>
+    <div>
+      <div class="panel-title mb-2"><i data-lucide="scale" class="w-3 h-3"></i>Analyst policy</div>
+      <div class="text-slate-400 leading-relaxed">
+        Behavioural-only attributions (no PGP key, wallet or infrastructure hit) are
+        structurally capped at <span class="mono text-amber-400">${pct(m.soft_match_cap)}</span>
+        and labelled <i>PROBABLE_SOFT</i> / <i>LEAD</i>. A hard-selector match saturates at
+        <span class="mono text-emerald-400">${pct(m.hard_match_ceiling)}</span>.
+        Anything below <span class="mono text-slate-400">${pct(m.reporting_floor)}</span> is not
+        reportable, and a lead must clear the runner-up by
+        <span class="mono text-slate-400">${pct(m.min_margin)}</span> to be called at all.
+      </div>
+      <div class="text-slate-600 leading-relaxed mt-2">
+        Prose is a lead. A selector is proof.</div>
+    </div>`;
+}
+
+/* ----------------------------- sandbox ----------------------------- */
+function openSandbox(seedHandle){
+  $('#sandbox').classList.remove('hidden');
+  if(seedHandle){
+    const p=S.actors.find(x=>x.handle===seedHandle);
+    if(p && p.posts && p.posts.length){
+      $('#smp-text').value=p.posts[0].body;
+      $('#smp-text').dispatchEvent(new Event('input'));
+    }
+  }
+  icons();
+}
+function closeSandbox(){ $('#sandbox').classList.add('hidden'); }
+
+async function buildPresets(){
+  const {samples}=await getJSON('/api/samples');
+  $('#smp-presets').innerHTML = samples.map(s=>`
+    <button class="btn !py-1.5 !px-2.5 !text-[11px] text-left" onclick="loadPreset('${esc(s.id)}')">
+      <i data-lucide="file-input" class="w-3 h-3 shrink-0 text-slate-500"></i>
+      <span class="truncate">${esc(s.title)}</span>
+    </button>`).join('');
+  icons();
+}
+
+async function loadPreset(id){
+  const {sample:s}=await getJSON('/api/samples/'+id);
+  $('#smp-text').value   = s.text || '';
+  $('#smp-pgp').value    = s.pgp || '';
+  $('#smp-wallet').value = s.wallet || '';
+  $('#smp-onion').value  = '';
+  S.hours = new Set(s.posting_hours || []);
+  paintHours();
+  $('#smp-text').dispatchEvent(new Event('input'));
+  toast(`Loaded "${s.title}" (${s.expected_actor || 'control sample'}) into the sandbox`);
+}
+
+function buildHourPicker(){
+  $('#smp-hours').innerHTML = Array.from({length:24},(_,h)=>
+    `<button class="h-7 rounded text-[9px] mono border transition-colors"
+       data-h="${h}" onclick="toggleHour(${h})"
+       style="background:#080d16;border-color:#1c2636;color:#64748b">${String(h).padStart(2,'0')}</button>`
+  ).join('');
+}
+function toggleHour(h){
+  S.hours.has(h)?S.hours.delete(h):S.hours.add(h);
+  paintHours();
+}
+function paintHours(){
+  $$('#smp-hours button').forEach(b=>{
+    const on = S.hours.has(+b.dataset.h);
+    b.style.background = on ? 'rgba(56,189,248,.2)' : '#080d16';
+    b.style.borderColor = on ? '#38bdf8' : '#1c2636';
+    b.style.color       = on ? '#7dd3fc' : '#64748b';
+  });
+  const n=S.hours.size;
+  $('#smp-hcount').textContent = n<3
+    ? `${n} selected — need ≥3 for circadian`
+    : `${n} selected`;
+}
+function fillHours(kind){
+  const set = kind==='ledger' ? [0,1,2,3,4,5,13,14,15,22]
+                                : [8,9,10,11,12,13,14,15,16,17];
+  S.hours=new Set(set); paintHours();
+}
+function clearHours(){ S.hours=new Set(); paintHours(); }
+
+async function runAnalysis(){
+  const btn=$('#smp-run'); btn.disabled=true;
+  btn.innerHTML='<i data-lucide="loader-2" class="w-4 h-4 animate-spin"></i>Analysing…';
+  const payload={
+    text:$('#smp-text').value,
+    pgp:$('#smp-pgp').value.trim()||null,
+    wallet:$('#smp-wallet').value.trim()||null,
+    onion:$('#smp-onion').value.trim()||null,
+    posting_hours:Array.from(S.hours).sort((a,b)=>a-b),
+    label:'Pasted sample'
+  };
+  try{
+    const t0=performance.now();
+    const r=await fetch('/api/analyze-persona',{method:'POST',
+      headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
+    if(!r.ok){
+      const err=await r.json().catch(()=>({detail:r.statusText}));
+      throw new Error(typeof err.detail==='string'?err.detail:JSON.stringify(err.detail));
+    }
+    const d=await r.json();
+    S.lastResult=d;
+    renderResult(d, performance.now()-t0);
+    applyGraphPatch(d.graph_patch);
+  }catch(e){
+    $('#smp-results').innerHTML=`<div class="flex items-center justify-center h-full">
+      <div class="text-center">
+        <i data-lucide="alert-octagon" class="w-8 h-8 text-alert-400 mx-auto mb-2"></i>
+        <div class="text-alert-400 text-[12px]">${esc(e.message)}</div></div></div>`;
+  }finally{
+    btn.disabled=false;
+    btn.innerHTML='<i data-lucide="crosshair" class="w-4 h-4"></i>Run Attribution Analysis';
+    icons();
+  }
+}
+
+function renderResult(d, ms){
+  const a=d.attribution, col=verdictColor(d.verdict);
+  const groups=a?Object.entries(a.channels).filter(([,c])=>c.fired):[];
+
+  $('#smp-results').innerHTML = `
+  <div class="fade-in space-y-3.5">
+    <!-- verdict -->
+    <div class="rounded-lg border p-3.5" style="border-color:${col}44;background:${col}0d">
+      <div class="flex items-start justify-between gap-3">
+        <div class="min-w-0">
+          <div class="tag mb-1.5" style="background:${col}22;color:${col}">${esc(d.verdict)}</div>
+          <div class="text-[19px] font-bold leading-tight" style="color:${col}">
+            ${a?esc(a.actor):'No attribution'}</div>
+          ${a?`<div class="text-[11px] text-slate-400 mt-1">
+                 matched persona <span class="mono text-slate-200">${esc(a.best_persona)}</span>
+                 · margin ${pct(a.margin)} over ${d.ranking[1]?esc(d.ranking[1].actor):'—'}</div>`:''}
+        </div>
+        ${a?gaugeSvg(a.score, d.verdict):''}
+      </div>
+      <div class="text-[10.5px] text-slate-400 mt-2.5 leading-relaxed border-t pt-2.5"
+           style="border-color:${col}33">${esc(d.verdict_reason)}</div>
+      ${a&&a.cap_applied?`<div class="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
+        <i data-lucide="shield-alert" class="w-3 h-3 shrink-0 mt-px"></i>
+        <span>Uncapped fusion would have scored ${pct(a.uncapped_score)}.</span></div>`:''}
+      <div class="text-[9px] text-slate-600 mt-2 mono">
+        computed in ${ms.toFixed(0)} ms · Score = 1 − ∏(1 − w·sim)</div>
+    </div>
+
+    <!-- channel bars -->
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="bar-chart-3" class="w-3 h-3"></i>Evidence Breakdown — every vector that fired
+      </div>
+      ${groups.length? groups.map(([name,c])=>{
+        const cc=verdictColor(d.verdict);
+        return `
+        <div class="mb-2.5">
+          <div class="flex items-center justify-between gap-2 text-[10.5px] mb-1">
+            <span class="text-slate-300 flex items-center gap-1.5">
+              <i data-lucide="${CHANNEL_ICON[name]||'activity'}" class="w-3 h-3 text-slate-500"></i>
+              ${esc(CHANNEL_LABEL[name]||name)}
+              <span class="text-slate-600 mono">w=${c.weight.toFixed(2)}</span>
+            </span>
+            <span class="mono" style="color:${cc}">${pct(c.similarity)}</span>
+          </div>
+          <div class="scan"><i style="width:${c.similarity*100}%;background:${cc}"></i></div>
+          <div class="mt-1 space-y-0.5">
+            ${c.vectors.map(v=>`
+              <div class="flex items-center justify-between gap-2 text-[9.5px]">
+                <span class="mono text-slate-500 truncate">${esc(v.vector)}${v.label?' · '+esc(v.label):''}</span>
+                <span class="mono text-slate-500 shrink-0">
+                  raw ${(v.raw??0).toFixed(3)}${v.z!=null?` · z ${v.z>=0?'+':''}${v.z}`:''}
+                  → <span class="text-slate-300">${pct(v.similarity)}</span></span>
+              </div>`).join('')}
+          </div>
+        </div>`;}).join('')
+      : '<div class="text-[11px] text-slate-600">No vector cleared its null distribution.</div>'}
+    </div>
+
+    <!-- rebrand -->
+    ${d.rebrand.candidates.length? `
+    <div class="rounded-lg border p-3 ${d.rebrand.detected
+        ? 'border-purple-500/35 bg-purple-500/8':'border-ink-600 bg-ink-800'}">
+      <div class="flex items-center gap-2 mb-1.5">
+        <i data-lucide="git-compare" class="w-3.5 h-3.5 text-purple-400"></i>
+        <span class="text-[11px] font-semibold text-purple-300">RE-BRAND DETECTOR</span>
+        ${d.rebrand.detected?'<span class="tag bg-purple-500/20 text-purple-300">TRIGGERED</span>':''}
+      </div>
+      ${d.rebrand.candidates.map(c=>`
+        <div class="text-[10.5px] text-slate-400 leading-relaxed">
+          <span class="mono text-slate-200">${esc(c.successor)}</span> vs
+          <span class="mono text-slate-200">${esc(c.predecessor)}</span>:
+          char n-gram ${c.char_ngram_raw!=null?c.char_ngram_raw.toFixed(3):'—'},
+          24h UTC r = <span class="mono text-cyan-300">${c.circadian_r.toFixed(3)}</span>,
+          dormant ${c.dormant_days} days.
+          <span class="tag ${c.hard_selector_overlap.any
+            ?'bg-emerald-500/15 text-emerald-400':'bg-slate-600/30 text-slate-400'} ml-1">
+            ${c.hard_selector_overlap.any?'SELECTOR REUSE FOUND':'ZERO SELECTOR OVERLAP'}</span>
+        </div>`).join('')}
+      <div class="text-[9.5px] text-slate-600 mt-1.5 leading-relaxed">${esc(d.rebrand.method)}</div>
+    </div>` : ''}
+
+    <!-- selectors -->
+    ${d.selector_hits.length? `
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="key-round" class="w-3 h-3"></i>Selector hits</div>
+      <div class="space-y-1">
+        ${d.selector_hits.map(h=>`
+          <div class="flex items-center justify-between gap-2 rounded-md border px-2.5 py-1.5
+                      ${h.contested?'border-amber-500/35 bg-amber-500/5':'border-ink-600 bg-ink-800'}">
+            <span class="text-[10px] mono ${h.contested?'text-amber-300':'text-slate-400'} truncate">
+              ${esc(h.query)}</span>
+            <span class="text-[10px] mono shrink-0 ${h.contested?'text-amber-400':'text-sky-400'}">
+              ${esc(h.matched_persona)}${h.contested?' ⚠':''}</span>
+          </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- ranking -->
+    <div>
+      <div class="panel-title mb-2">
+        <i data-lucide="list-ordered" class="w-3 h-3"></i>Full cluster ranking</div>
+      <div class="space-y-1">
+        ${d.ranking.map((r,i)=>`
+          <div class="flex items-center gap-2 ${r.actor_id===a?.actor_id?'':'opacity-55'}">
+            <span class="mono text-[9.5px] text-slate-600 w-3">${i+1}</span>
+            <span class="text-[10.5px] text-slate-300 w-32 truncate">${esc(r.actor)}</span>
+            <div class="scan flex-1"><i style="width:${r.score*100}%;
+              background:${i===0?col:'#475569'}"></i></div>
+            <span class="mono text-[10px] w-11 text-right" style="color:${i===0?col:'#64748b'}">
+              ${pct(r.score)}</span>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="text-[9px] text-slate-600 mono leading-relaxed border-t border-ink-600 pt-2">
+      ${esc(d.methodology.calibration)}
+    </div>
+  </div>`;
+  icons();
+}
+
+function applyGraphPatch(patch){
+  if(!S.cy || !patch) return;
+  S.cy.batch(()=>{
+    patch.nodes.forEach(n=>S.cy.add({group:'nodes', data:n}));
+    patch.edges.forEach(e=>S.cy.add({group:'edges', data:e}));
+  });
+  patch.nodes.forEach(n=>{
+    const el=S.cy.getElementById(n.id);
+    if(el.length){
+      const t=S.cy.getElementById(verdictId());
+      if(t.length) t.connectedNodes().union(el).layout({name:'circle', radius:110});
+    }
+  });
+  S.cy.elements().removeClass('dim');
+  patch.nodes.forEach(n=>S.cy.getElementById(n.id).addClass('halo'));
+}
+function verdictId(){
+  const a=S.lastResult?.attribution;
+  return a?a.actor_id:'';
+}
+
+/* ----------------------------- toast ----------------------------- */
+let toastTimer;
+function toast(msg, kind='ok'){
+  let el=$('#toast');
+  if(!el){
+    el=document.createElement('div'); el.id='toast';
+    document.body.appendChild(el);
+  }
+  const c = kind==='error' ? '#f43f5e' : '#34d399';
+  el.innerHTML=`<div class="fixed bottom-5 left-1/2 -translate-x-1/2 z-[60] px-4 py-2.5
+      rounded-lg border text-[11.5px] shadow-2xl"
+      style="background:#0d1420;border-color:${c}66;color:#e2e8f0">
+      <span style="color:${c}">●</span> ${esc(msg)}</div>`;
+  el.style.opacity='1';
+  clearTimeout(toastTimer);
+  toastTimer=setTimeout(()=>{ el.style.transition='opacity .4s'; el.style.opacity='0'; },3200);
+}
+
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape') closeSandbox();
+  if(e.key==='Enter' && (e.ctrlKey||e.metaKey) && !$('#sandbox').classList.contains('hidden'))
+    runAnalysis();
+});
+$('#smp-text') && document.addEventListener('input', e=>{
+  if(e.target.id==='smp-text')
+    $('#smp-chars').textContent = e.target.value.length + ' chars';
+});
+
+boot();
+</script>
+</body>
+</html>

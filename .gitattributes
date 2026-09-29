@@ -1,0 +1,20 @@
+# Normalise line endings so the same file checks out identically everywhere.
+# Store LF in the repository, and check out LF on every platform (including
+# Windows) so Python, JS and Markdown never get rewritten under you.
+* text=auto eol=lf
+
+# Windows-native files that genuinely require CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary assets must never be touched.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.db binary
+*.sqlite3 binary
