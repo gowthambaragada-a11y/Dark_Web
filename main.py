@@ -431,4 +431,11 @@ def favicon() -> Response:
 if __name__ == "__main__":  # pragma: no cover
     import uvicorn
 
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    # Local default is 127.0.0.1:8000, but container hosts (Render, Docker,
+    # Railway, Fly) inject HOST/PORT and must bind 0.0.0.0 to be reachable.
+    uvicorn.run(
+        "main:app",
+        host=os.environ.get("HOST", "127.0.0.1"),
+        port=int(os.environ.get("PORT", 8000)),
+        reload=os.environ.get("RELOAD", "0") == "1",
+    )

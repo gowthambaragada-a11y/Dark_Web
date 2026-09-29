@@ -181,6 +181,50 @@ enough samples to be meaningful.
 
 ---
 
+## Deployment
+
+### Render.com (recommended)
+
+The repository ships a Render blueprint, so this is a no-argument deploy:
+
+1. Push the repository to GitHub.
+2. In Render: **New → Blueprint** → select the repo → **Apply**.
+3. Render reads `render.yaml`, installs `requirements.txt`, and starts
+   `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`.
+
+The service comes up on `https://anvaya-deanon.onrender.com` serving both the
+dashboard and the API from one origin, so the dashboard's relative API URLs work
+unchanged.
+
+A few things to know on the free tier:
+
+- **Cold starts.** Free services idle out after ~15 minutes and take ~30 s to
+  wake. The corpus is rebuilt from `seed_data.py` on every boot (well under a
+  second), so there is no database to provision.
+- **Health check.** Render polls `/api/health`; it reports corpus size, graph
+  dimensions and the storage mode, so it doubles as a smoke test.
+- **One worker, on purpose.** The corpus is materialised in-memory per process.
+  A single worker keeps the SQLite state and the lock that guards it coherent.
+  Raising `--workers` would multiply the corpus in RAM; it is safe (the seed is
+  deterministic) but wasteful, and a real multi-worker setup should move to a
+  real database first.
+- **CDN assets.** Tailwind, Cytoscape.js, Chart.js and Lucide load from public
+  CDNs, so the *browser* needs internet on first paint. The API never makes an
+  outbound request.
+
+### Other hosts
+
+| Host | Command |
+| --- | --- |
+| Railway / Fly / Heroku | `Procfile` is provided; uses `${PORT:-8000}` |
+| Docker | `HOST=0.0.0.0 PORT=8000 python main.py` also works, since `main.py` reads `HOST`/`PORT` |
+| Local network demo | `python main.py`, then share your LAN IP:8000 |
+
+GitHub Pages is **not** suitable here: it serves static files only and cannot run
+the FastAPI backend the dashboard depends on.
+
+---
+
 ## Tests
 
 ```bash
@@ -205,6 +249,9 @@ seed_data.py    The synthetic corpus (venues, personas, selectors, evidence)
 smoke_test.py   End-to-end regression suite
 static/
   index.html    Single-page dashboard (Tailwind + Cytoscape + Chart.js + Lucide)
+render.yaml     Render blueprint (free-tier deploy)
+Procfile        Start command for Railway / Fly / Heroku
+.python-version Pins the interpreter for Render
 ```
 
 The dashboard loads Tailwind, Cytoscape.js, Chart.js and Lucide from a CDN, so the

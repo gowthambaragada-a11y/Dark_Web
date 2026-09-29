@@ -1,0 +1,34 @@
+# Render blueprint for the Anvaya Dark Web De-anonymization Platform.
+#
+# Deploy with:  New +  Blueprint  ->  point at this repo  ->  Apply
+# Render reads this file and provisions the service with no further input.
+#
+# NOTE: the browser dashboard also pulls Tailwind, Cytoscape.js, Chart.js and
+# Lucide from public CDNs, so the *browser* (not the server) needs internet on
+# first paint. The API itself is fully offline.
+
+services:
+  - type: web
+    name: anvaya-deanon
+    runtime: python
+    plan: free
+    region: singapore
+
+    buildCommand: pip install --no-cache-dir -r requirements.txt
+
+    # Single worker on purpose: the corpus is materialised in-memory per
+    # process, so one worker keeps the SQLite state and the RLock that guards
+    # it coherent. Raise worker count only alongside a real connection pool.
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1
+
+    healthCheckPath: /api/health
+
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.13.5"
+      # Keep the corpus in memory: it is rebuilt from seed_data.py on boot in
+      # well under a second, so there is nothing to provision or migrate.
+      - key: ANVAYA_DB
+        value: ":memory:"
+      - key: PYTHONUNBUFFERED
+        value: "1"
