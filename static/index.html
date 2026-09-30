@@ -451,6 +451,32 @@ const S = {
 
 const $  = (s,r=document)=>r.querySelector(s);
 const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
+
+/* ------------------------------------------------------------------ *
+ * API base resolution
+ *
+ * The dashboard is served either
+ *   (a) by main.py, where the API is the same origin   -> ''  (relative)
+ *   (b) by a static host (GitHub Pages) with the API on
+ *       a separate origin (Render)                      -> absolute URL
+ *
+ * Resolution order, first hit wins:
+ *   1. ?api=<url>            query override, handy for testing
+ *   2. window.ANVAYA_API_BASE  set by an injected config.js
+ *   3. ANVAYA_API_BASE         baked-in default below (edit for your host)
+ *   4. same origin            local dev / single-origin deploy
+ *
+ * Edit DEFAULT_API_BASE to your deployed backend and redeploy the static
+ * copy. Leave it as '' when main.py serves the page.
+ * ------------------------------------------------------------------ */
+const DEFAULT_API_BASE = '';   // e.g. 'https://anvaya-deanon.onrender.com'
+const API_BASE = (() => {
+  const q = new URLSearchParams(location.search).get('api');
+  const raw = (q || window.ANVAYA_API_BASE || DEFAULT_API_BASE || '').trim();
+  return raw.replace(/\/+$/, '');
+})();
+const apiUrl = p => API_BASE + p;
+
 const esc = s => String(s??'').replace(/[&<>"']/g, c =>
   ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pct = v => (Math.round((v??0)*1000)/10).toFixed(1)+'%';
@@ -529,15 +555,38 @@ async function boot(){
     if(actors.personas.length) openPersona(actors.personas[0].id);
   }catch(err){
     $('#bootmsg').innerHTML =
-      `<span class="text-alert-400">FAILED: ${esc(err.message)}</span>`;
+      `<span class="text-alert-400">FAILED: ${esc(err.message)}</span>`
+      + `<div class="mt-2 text-[10.5px] text-slate-500 font-mono">`
+      + `API base: ${esc(API_BASE || 'same origin')}</div>`
+      + (API_BASE
+          ? `<div class="mt-1 text-[10.5px] text-slate-500">`
+            + `The backend is unreachable or still deploying. Set API_BASE in `
+            + `static/index.html, or override with ?api=&lt;url&gt;</div>`
+          : `<div class="mt-1 text-[10.5px] text-slate-500">`
+            + `Serving this page without its API. Start the backend with `
+            + `<span class="font-mono">python main.py</span>, or set API_BASE if `
+            + `the API is on another host.</div>`);
     console.error(err);
   }
   icons();
 }
 
 async function getJSON(url){
-  const r = await fetch(url);
-  if(!r.ok) throw new Error(`${url} → ${r.status}`);
+  const full = apiUrl(url);
+  const r = await fetch(full);
+  if(!r.ok) throw new Error(`${full} → ${r.status}`);
+  return r.json();
+}
+
+async function postJSON(url, body){
+  const full = apiUrl(url);
+  const r = await fetch(full, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  if(!r.ok){
+    let detail = '';
+    try{ detail = (await r.json()).detail || ''; }catch(_){}
+    throw new Error(`${full} → ${r.status}${detail?' ('+detail+')':''}`);
+  }
   return r.json();
 }
 
@@ -684,15 +733,17 @@ async function refresh(){
 
 function exportAs(fmt){
   const q=qs();
-  const url = fmt==='report' ? `/api/export/report${q?'?'+q:''}`
-                              : `/api/export/${fmt}${q?'?'+q:''}`;
+  const path = fmt==='report' ? `/api/export/report${q?'?'+q:''}`
+                               : `/api/export/${fmt}${q?'?'+q:''}`;
+  const url = apiUrl(path);
   if(fmt==='report'){
     const w = window.open(url,'_blank');
     if(!w) toast('Popup blocked — allow popups to open the dossier','error');
     else toast('Dossier opened — use your browser to Print → Save as PDF','ok');
   } else {
     const a=document.createElement('a');
-    a.href=url; a.download=''; document.body.appendChild(a); a.click(); a.remove();
+    a.href=url; a.download=''; a.rel='noopener';
+    document.body.appendChild(a); a.click(); a.remove();
     toast(`${fmt.toUpperCase()} export downloaded`,'ok');
   }
 }
@@ -1340,13 +1391,7 @@ async function runAnalysis(){
   };
   try{
     const t0=performance.now();
-    const r=await fetch('/api/analyze-persona',{method:'POST',
-      headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)});
-    if(!r.ok){
-      const err=await r.json().catch(()=>({detail:r.statusText}));
-      throw new Error(typeof err.detail==='string'?err.detail:JSON.stringify(err.detail));
-    }
-    const d=await r.json();
+    const d = await postJSON('/api/analyze-persona', payload);
     S.lastResult=d;
     renderResult(d, performance.now()-t0);
     applyGraphPatch(d.graph_patch);
@@ -1383,6 +1428,14 @@ function renderResult(d, ms){
       </div>
       <div class="text-[10.5px] text-slate-400 mt-2.5 leading-relaxed border-t pt-2.5"
            style="border-color:${col}33">${esc(d.verdict_reason)}</div>
+      ${d.below_floor_best?`
+        <div class="mt-2 flex items-start gap-1.5 text-[10px] text-slate-500">
+          <i data-lucide="circle-slash" class="w-3 h-3 shrink-0 mt-px"></i>
+          <span>Nearest candidate was
+            <span class="mono text-slate-400">${esc(d.below_floor_best.actor)}</span>
+            at ${pct(d.below_floor_best.score)} &mdash; ${pct(d.below_floor_best.shortfall)}
+            short of the reporting floor. Recorded, not attributed.</span>
+        </div>`:''}
       ${a&&a.cap_applied?`<div class="mt-2 flex items-start gap-1.5 text-[10px] text-amber-400">
         <i data-lucide="shield-alert" class="w-3 h-3 shrink-0 mt-px"></i>
         <span>Uncapped fusion would have scored ${pct(a.uncapped_score)}.</span></div>`:''}

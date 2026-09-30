@@ -200,9 +200,25 @@ def run_suite(base: str) -> None:
                                   {"sample_id": sample_id})
         ok = status == 200 and res.get("verdict") == verdict
         detail = f"got {res.get('verdict')} expected {verdict}"
+        got_actor = (res.get("attribution") or {}).get("actor_id")
         if ok and actor_id:
-            ok = res.get("attribution", {}).get("actor_id") == actor_id
-            detail = f"actor {res.get('attribution', {}).get('actor_id')} != {actor_id}"
+            ok = got_actor == actor_id
+            detail = f"actor {got_actor} != {actor_id}"
+        elif ok:
+            # Negative control: NO_MATCH must not name a subject. This used to
+            # be skipped, which let GHOST CARTEL leak through as smp-5's
+            # attribution despite the engine reporting "nothing to attribute".
+            ok = got_actor is None
+            detail = f"expected no attribution, got {got_actor}"
+            check(f"{sample_id} -> no attribution named", ok, detail)
+            near = res.get("below_floor_best") or {}
+            check(f"{sample_id} -> nearest candidate still reported",
+                  bool(near.get("actor")) and float(near.get("score", 0)) < 0.45
+                  and float(near.get("shortfall", 0)) > 0,
+                  f"near={near.get('actor')} score={near.get('score')} "
+                  f"short={near.get('shortfall')}")
+            ok = True
+            detail = "verdict ok"
         check(f"{sample_id} -> {verdict}", ok, detail)
 
     section("6. hard-selector resolution")

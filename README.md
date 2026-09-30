@@ -74,8 +74,25 @@ attribution fails in identifiable ways:
 3. **Margin requirement.** A candidate must beat the runner-up by `0.05` or the
    result is downgraded.
 4. **Reporting floor.** Anything below `0.45` is reported as `NO_MATCH` rather
-   than being presented as a lead.
+   than being presented as a lead. Below the floor the API returns
+   `attribution: null` — it does **not** name a subject. The nearest cluster is
+   still reported, in a separate field, so a real lead is never silently lost:
+
+   ```json
+   { "verdict": "NO_MATCH",
+     "attribution": null,
+     "below_floor_best": { "actor": "GHOST CARTEL", "score": 0.4426,
+                           "shortfall": 0.0074 } }
+   ```
+
+   The dashboard renders this as **No attribution** with a muted note reading
+   *"nearest candidate was GHOST CARTEL at 44.3% — 0.7% short of the reporting
+   floor. Recorded, not attributed."* Naming a subject while the verdict says
+   `NO_MATCH` is exactly the failure mode this project exists to avoid.
+
 5. **Negative control.** Sample `smp-5` is register-shifted and *must not* match.
+   It is asserted in `smoke_test.py` to return `attribution: null` — the closest
+   cluster it scores against is GHOST CARTEL at `0.4426`, just under the floor.
 
 ---
 
@@ -177,13 +194,32 @@ enough samples to be meaningful.
 | `smp-2` | `CONFIRMED` | VEXING HYDRA |
 | `smp-3` | `CONFIRMED` | MULE CARTEL |
 | `smp-4` | `PROBABLE_SOFT` | GHOST CARTEL |
-| `smp-5` | `NO_MATCH` | — (negative control) |
+| `smp-5` | `NO_MATCH` | — (negative control; `attribution` is `null`) |
+
+These five rows are asserted on every `smoke_test.py` run, including the
+requirement that `smp-5` names no subject at all.
 
 ---
 
 ## Deployment
 
-### Render.com (recommended)
+### Two ways to deploy
+
+The dashboard is a static page; the intelligence is a FastAPI service. That split
+determines which host you need:
+
+| | Backend | Dashboard | Notes |
+| --- | --- | --- | --- |
+| **A. Render only** (recommended) | Render | Render, same origin | Nothing to configure — relative API URLs just work |
+| **B. Render + GitHub Pages** | Render | `*.github.io` | Set one constant so the page knows the API origin |
+
+GitHub Pages **cannot** run the FastAPI backend. It serves static files only. So
+in option B, Pages hosts the HTML and Render hosts `/api/*`, and the dashboard
+needs to be told where that is.
+
+---
+
+### A. Render only (recommended)
 
 The repository ships a Render blueprint, so this is a no-argument deploy:
 
@@ -192,9 +228,9 @@ The repository ships a Render blueprint, so this is a no-argument deploy:
 3. Render reads `render.yaml`, installs `requirements.txt`, and starts
    `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`.
 
-The service comes up on `https://anvaya-deanon.onrender.com` serving both the
-dashboard and the API from one origin, so the dashboard's relative API URLs work
-unchanged.
+The service serves both the dashboard and the API from one origin, so the
+dashboard's relative API URLs work unchanged. It comes up on
+`https://anvaya-deanon.onrender.com` (or whatever name is available).
 
 A few things to know on the free tier:
 
@@ -212,6 +248,67 @@ A few things to know on the free tier:
   CDNs, so the *browser* needs internet on first paint. The API never makes an
   outbound request.
 
+### B. Render (API) + GitHub Pages (dashboard)
+
+Use this only if the dashboard must live on `github.io`. Deploy the API with the
+blueprint above, then point the static page at it.
+
+**1. Deploy the API to Render** exactly as in option A.
+
+**2. Tell the page where the API is.** In `static/index.html`:
+
+```js
+const DEFAULT_API_BASE = 'https://anvaya-deanon.onrender.com';
+```
+
+That is the only line that changes. Every request — boot, filters, dossiers,
+the sandbox POST and all five export formats — is routed through `apiUrl()`, so
+nothing else needs touching. Leave it as `''` for local dev or a single-origin
+Render deploy.
+
+`configure_api_base.py` writes that line for you (it normalises the URL and
+refuses anything that is not a bare origin):
+
+```bash
+python configure_api_base.py --check
+python configure_api_base.py https://anvaya-deanon.onrender.com --verify
+python configure_api_base.py --reset      # back to same-origin
+```
+
+`--verify` pings `<base>/api/health` and prints corpus size, so you can confirm
+the backend is live before pointing the page at it.
+
+Two overrides exist for testing without a rebuild:
+
+- `?api=https://host` — per-request override, useful to compare two backends.
+- `window.ANVAYA_API_BASE` — set by an injected `config.js`, if you would rather
+  not commit the host.
+
+Resolution order is `?api=` → `window.ANVAYA_API_BASE` → `DEFAULT_API_BASE` →
+same origin. If the backend is unreachable the boot screen now names the base it
+tried, instead of failing on a bare `404`.
+
+**3. GitHub Pages settings.** The repo carries `.nojekyll`, which switches Jekyll
+off so raw files are served. Without it Jekyll renders `README.md` as the
+homepage and your dashboard is buried at `/static/index.html`.
+
+- Source: deploy from a branch, **root** folder
+- The root `index.html` forwards to `static/index.html`, preserving the query
+  string so `?api=` survives the hop
+
+Your two URLs then look like:
+
+```
+https://<user>.github.io/Dark_Web/                     dashboard (static)
+https://<render-host>.onrender.com/api/health          backend
+```
+
+**CORS.** Render and `github.io` are different origins, but `main.py` registers
+`CORSMiddleware` with `allow_origins=["*"]`, so the cross-origin `GET`s and the
+JSON `POST` are permitted and option B needs no proxy. That wildcard is fine for
+a read-only demo on a synthetic corpus; if you ever expose this with real data or
+authentication, pin it to your actual Pages origin instead of `*`.
+
 ### Other hosts
 
 | Host | Command |
@@ -220,15 +317,12 @@ A few things to know on the free tier:
 | Docker | `HOST=0.0.0.0 PORT=8000 python main.py` also works, since `main.py` reads `HOST`/`PORT` |
 | Local network demo | `python main.py`, then share your LAN IP:8000 |
 
-GitHub Pages is **not** suitable here: it serves static files only and cannot run
-the FastAPI backend the dashboard depends on.
-
 ---
 
 ## Tests
 
 ```bash
-python smoke_test.py                       # boots a temp server, runs 78 checks
+python smoke_test.py                       # boots a temp server, runs 80 checks
 python smoke_test.py --base http://127.0.0.1:8000   # test a running server
 ```
 
@@ -247,12 +341,18 @@ engine.py       SQLite schema, NetworkX graph, stylometry, circadian,
                 attribution, cluster resolution, exports
 seed_data.py    The synthetic corpus (venues, personas, selectors, evidence)
 smoke_test.py   End-to-end regression suite
+configure_api_base.py  Set the dashboard's API base for a split deploy
 static/
   index.html    Single-page dashboard (Tailwind + Cytoscape + Chart.js + Lucide)
+index.html      Root forwarding page for GitHub Pages (keeps static/ canonical)
 render.yaml     Render blueprint (free-tier deploy)
 Procfile        Start command for Railway / Fly / Heroku
 .python-version Pins the interpreter for Render
+.nojekyll       Switches Jekyll off so GitHub Pages serves the raw files
 ```
+
+`static/index.html` is the only copy of the dashboard — `main.py` serves it at
+`/` and `/static/`, and the root `index.html` merely forwards to it.
 
 The dashboard loads Tailwind, Cytoscape.js, Chart.js and Lucide from a CDN, so the
 browser view needs internet on first paint. The API is fully offline.

@@ -1581,6 +1581,7 @@ class IntelEngine:
         top = per_actor[0] if per_actor else None
         verdict = "NO_MATCH"
         verdict_reason = "No usable evidence vectors were supplied."
+        below_floor_best = None
         if top:
             runner = per_actor[1] if len(per_actor) > 1 else None
             if top["score"] < MIN_FLOOR:
@@ -1589,6 +1590,20 @@ class IntelEngine:
                     f"Best cluster scored {top['score']:.1%}, below the {MIN_FLOOR:.0%} "
                     f"reporting floor. No vector cleared the cross-actor null, so "
                     f"there is nothing to attribute.")
+                # Report the nearest neighbour separately instead of as an
+                # attribution: an investigator still wants to see what came
+                # closest and how far short it fell, but naming it as the
+                # subject would contradict NO_MATCH (and the smp-5 control).
+                below_floor_best = {
+                    "actor_id": top["actor_id"],
+                    "actor": top["actor"],
+                    "best_persona": top["best_persona"],
+                    "best_persona_id": top["best_persona_id"],
+                    "score": top["score"],
+                    "shortfall": round(MIN_FLOOR - top["score"], 4),
+                    "margin": top["margin"],
+                }
+                top = None
             elif runner and top["margin"] < MIN_MARGIN and not top["hard_selector_fired"]:
                 verdict = "INCONCLUSIVE"
                 verdict_reason = (
@@ -1637,6 +1652,7 @@ class IntelEngine:
             "verdict": verdict,
             "verdict_reason": verdict_reason,
             "attribution": top,
+            "below_floor_best": below_floor_best,
             "ranking": per_actor,
             "persona_ranking": sorted(per_persona, key=lambda r: -r["score"]),
             "rebrand": rebrand,
