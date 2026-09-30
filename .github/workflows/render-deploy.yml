@@ -5,8 +5,12 @@
 # outside their dashboard. The hook is a bearer secret -- anyone holding it can
 # deploy, so it lives in repository secrets and is never printed.
 #
-# If the secret is absent the job is skipped rather than failed, so a fork or a
-# fresh clone still gets a green Actions tab.
+# If the secret is absent this job reports and exits cleanly instead of
+# failing, so a fork or a fresh clone still gets a green Actions tab.
+#
+# Note: the hook is read through `env:` and branched on in bash, because GitHub
+# does not expose the `secrets` context to step conditionals -- referencing it
+# there fails the whole workflow before any job starts.
 
 name: Deploy API to Render
 
@@ -26,41 +30,51 @@ jobs:
   deploy:
     name: Trigger Render deploy
     runs-on: ubuntu-latest
+    env:
+      HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+      REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+      SHA: ${{ github.sha }}
     steps:
-      - name: Skip when no deploy hook is configured
-        if: ${{ secrets.RENDER_DEPLOY_HOOK == '' }}
-        run: |
-          echo "::notice::RENDER_DEPLOY_HOOK is not set; nothing to deploy."
-          echo "Run the 'Bootstrap Render service' workflow once to create the"
-          echo "service, then add the deploy hook as a repository secret."
-
       - name: Trigger the deploy
-        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
-        id: hook
         run: |
           set -euo pipefail
+
+          if [ -z "${HOOK:-}" ]; then
+            echo "::notice::RENDER_DEPLOY_HOOK is not set; skipping the API deploy."
+            echo "Run the 'Bootstrap Render service' workflow once to create the"
+            echo "service, then add its deploy hook as a repository secret."
+            exit 0
+          fi
+
+          echo "::add-mask::$HOOK"
+          echo "triggering a Render deploy for ${SHA:0:7} on ${REPO_URL}"
+
           code=$(curl -sS -o response.json -w '%{http_code}' \
-            -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}" \
+            -X POST "$HOOK" \
             -H 'Content-Type: application/json' \
-            -d "{\"clearCache\":\"do_not\"}")
+            -H 'Accept: application/json' \
+            -d '{}')
+
           echo "HTTP $code"
-          cat response.json; echo
-          if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
-            deploy=$(python3 -c "
+          python3 - <<'PY'
           import json
-          print(json.load(open('response.json')).get('deploy',{}).get('id',''))" 2>/dev/null || echo '')
-          echo "id=$deploy" >> "$GITHUB_OUTPUT"
-          else
+          try:
+              body = json.load(open("response.json"))
+          except Exception:
+              print(open("response.json").read()[:500])
+              raise SystemExit(1)
+          deploy = body.get("deploy", {})
+          print(f"  deploy id : {deploy.get('id', '(none)')}")
+          print(f"  status    : {deploy.get('status', '(none)')}")
+          print(f"  commit    : {deploy.get('commit', {}).get('id', '(none)')[:7]}")
+          PY
+
+          if [ "$code" -lt 200 ] || [ "$code" -ge 300 ]; then
             echo "::error::Render rejected the deploy hook (HTTP $code)"
             exit 1
           fi
 
-      - name: Wait for the deploy to go live
-        if: ${{ steps.hook.outputs.id != '' }}
-        run: |
-          set -euo pipefail
-          echo "deploy id ${{ steps.hook.outputs.id }} -- Render will email on failure."
-          echo "Watch progress at https://dashboard.render.com"
           echo ""
-          echo "Note: free instances spin down after ~15 min idle, so the first"
-          echo "request after a pause can take 30-60s to respond."
+          echo "Render is building the API. Progress: https://dashboard.render.com"
+          echo "Free instances spin down after ~15 min idle, so the first request"
+          echo "after a pause can take 30-60s while the instance restarts."
