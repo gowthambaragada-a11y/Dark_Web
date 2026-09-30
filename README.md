@@ -2,6 +2,10 @@
 
 **Team Anvaya · Smart India Hackathon 2026 · Problem Statement 26151**
 
+### Live dashboard
+
+**https://gowthambaragada-a11y.github.io/Dark_Web/**
+
 An offline analytical platform that de-anonymizes dark-web threat actors by fusing
 stylometric, cryptographic, financial and infrastructure signals into a single
 attribution score, then visualizes the resulting identity graph.
@@ -216,125 +220,110 @@ requirement that `smp-5` names no subject at all.
 
 ## Deployment
 
-### Two ways to deploy
+`git push` is the only deploy command. Three GitHub Actions workflows do the rest:
 
-The dashboard is a static page; the intelligence is a FastAPI service. That split
-determines which host you need:
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `pages.yml` | push to `main` | Builds the dashboard and publishes it to GitHub Pages |
+| `render-deploy.yml` | push to `main` | Triggers a redeploy of the API on Render |
+| `render-bootstrap.yml` | manual, **once** | Creates the Render service through the Render API |
 
-| | Backend | Dashboard | Notes |
-| --- | --- | --- | --- |
-| **A. Render only** (recommended) | Render | Render, same origin | Nothing to configure — relative API URLs just work |
-| **B. Render + GitHub Pages** | Render | `*.github.io` | Set one constant so the page knows the API origin |
+GitHub Pages serves static files only, so it cannot run the FastAPI backend. The
+split is therefore deliberate:
 
-GitHub Pages **cannot** run the FastAPI backend. It serves static files only. So
-in option B, Pages hosts the HTML and Render hosts `/api/*`, and the dashboard
-needs to be told where that is.
+- **GitHub Pages** publishes the dashboard at
+  [gowthambaragada-a11y.github.io/Dark_Web](https://gowthambaragada-a11y.github.io/Dark_Web/)
+- **Render** runs the API, and the Pages build bakes its origin into the page
 
 ---
 
-### A. Render only (recommended)
+### One-time setup
 
-The repository ships a Render blueprint, so this is a no-argument deploy:
+**1. Point Pages at Actions.** Repo **Settings → Pages → Build and deployment →
+Source → GitHub Actions**. Nothing else is needed for the dashboard.
 
-1. Push the repository to GitHub.
-2. In Render: **New → Blueprint** → select the repo → **Apply**.
-3. Render reads `render.yaml`, installs `requirements.txt`, and starts
-   `uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1`.
+**2. Create the Render service.** Actions tab → **Bootstrap Render service** →
+*Run workflow*. Add these first, under **Settings → Secrets and variables →
+Actions**:
 
-The service serves both the dashboard and the API from one origin, so the
-dashboard's relative API URLs work unchanged. It comes up on
-`https://anvaya-deanon.onrender.com` (or whatever name is available).
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `RENDER_API_KEY` | from [render.com/account/api](https://render.com/account/api) |
+| Secret | `RENDER_OWNER_ID` | your workspace id (from `GET https://api.render.com/v1/owners`) |
 
-A few things to know on the free tier:
+The workflow creates the service with the right start command, region, plan and
+health check, and prints its hostname. It is safe to re-run — it adopts an
+existing service instead of creating a duplicate.
 
-- **Cold starts dominate the demo experience.** Free services idle out after
+**3. Wire up the two follow-ups** the bootstrap summary tells you about:
+
+| Kind | Name | Value |
+| --- | --- | --- |
+| Secret | `RENDER_DEPLOY_HOOK` | Render dashboard → your service → Settings → Deploy Hook |
+| Variable | `ANVAYA_API_BASE` | `https://anvaya-deanon.onrender.com` |
+
+`RENDER_DEPLOY_HOOK` is what makes `render-deploy.yml` work — without it that job
+skips itself instead of failing, so a fork still gets a green Actions tab.
+
+`ANVAYA_API_BASE` is a repository *variable*, not a secret: it is a public
+hostname. The Pages build writes it into `DEFAULT_API_BASE` at build time, so the
+dashboard knows where the API is without any code change.
+
+From then on:
+
+```bash
+git push
+```
+
+...redeploys the API and republishes Pages.
+
+### What the Pages build publishes
+
+Only `index.html`, `static/` and an empty `.nojekyll`. The backend, the corpus
+and the test suite are never uploaded to the public bucket. The build fails if
+the staged dashboard is missing its API helper or the below-floor footnote.
+
+### Free-tier behaviour
+
+- **Cold starts dominate the demo experience.** Free instances idle out after
   ~15 minutes, then take ~30 s for Render to schedule an instance on top of the
   ~4–8 s this app needs to import and build its vectorisers. Budget roughly
   **30–60 s for the first request after an idle period**; warm requests after
-  that are milliseconds. Nothing is provisioned or migrated, so there is no
-  database step to wait on — but do not demo this live right after a long pause.
+  that are milliseconds. Nothing is provisioned or migrated — but do not demo
+  this live right after a long pause.
 - **Health check.** Render polls `/api/health`; it reports corpus size, graph
   dimensions and the storage mode, so it doubles as a smoke test.
+- **Memory.** Measured peak is 191 MB against the free plan's 512 MB, so there
+  is ~320 MB of headroom even under concurrent load.
 - **The blueprint is schema-valid.** `render.yaml` validates against Render's
-  published JSON schema (`https://render.com/schema/render.yaml.json`), and the
-  `buildCommand` installs cleanly on a cold Python 3.13.5 venv.
+  published JSON schema, and `requirements.txt` installs cleanly on a cold
+  Python 3.13.5 venv. The bootstrap workflow uses the same values.
 - **One worker, on purpose.** The corpus is materialised in-memory per process.
   A single worker keeps the SQLite state and the lock that guards it coherent.
-  Raising `--workers` would multiply the corpus in RAM; it is safe (the seed is
-  deterministic) but wasteful, and a real multi-worker setup should move to a
-  real database first.
 - **CDN assets.** Tailwind, Cytoscape.js, Chart.js and Lucide load from public
   CDNs, so the *browser* needs internet on first paint. The API never makes an
   outbound request.
 
-### B. Render (API) + GitHub Pages (dashboard)
-
-Use this only if the dashboard must live on `github.io`. Deploy the API with the
-blueprint above, then point the static page at it.
-
-**1. Deploy the API to Render** exactly as in option A.
-
-**2. Tell the page where the API is.** In `static/index.html`:
-
-```js
-const DEFAULT_API_BASE = 'https://anvaya-deanon.onrender.com';
-```
-
-That is the only line that changes. Every request — boot, filters, dossiers,
-the sandbox POST and all five export formats — is routed through `apiUrl()`, so
-nothing else needs touching. Leave it as `''` for local dev or a single-origin
-Render deploy.
-
-`configure_api_base.py` writes that line for you (it normalises the URL and
-refuses anything that is not a bare origin):
-
-```bash
-python configure_api_base.py --check
-python configure_api_base.py https://anvaya-deanon.onrender.com --verify
-python configure_api_base.py --reset      # back to same-origin
-```
-
-`--verify` pings `<base>/api/health` and prints corpus size, so you can confirm
-the backend is live before pointing the page at it.
-
-Two overrides exist for testing without a rebuild:
-
-- `?api=https://host` — per-request override, useful to compare two backends.
-- `window.ANVAYA_API_BASE` — set by an injected `config.js`, if you would rather
-  not commit the host.
-
-Resolution order is `?api=` → `window.ANVAYA_API_BASE` → `DEFAULT_API_BASE` →
-same origin. If the backend is unreachable the boot screen now names the base it
-tried, instead of failing on a bare `404`.
-
-**3. GitHub Pages settings.** The repo carries `.nojekyll`, which switches Jekyll
-off so raw files are served. Without it Jekyll renders `README.md` as the
-homepage and your dashboard is buried at `/static/index.html`.
-
-- Source: deploy from a branch, **root** folder
-- The root `index.html` forwards to `static/index.html`, preserving the query
-  string so `?api=` survives the hop
-
-Your two URLs then look like:
-
-```
-https://<user>.github.io/Dark_Web/                     dashboard (static)
-https://<render-host>.onrender.com/api/health          backend
-```
-
-**CORS.** Render and `github.io` are different origins, but `main.py` registers
-`CORSMiddleware` with `allow_origins=["*"]`, so the cross-origin `GET`s and the
-JSON `POST` are permitted and option B needs no proxy. That wildcard is fine for
-a read-only demo on a synthetic corpus; if you ever expose this with real data or
-authentication, pin it to your actual Pages origin instead of `*`.
-
-### Other hosts
+### Running it without CI
 
 | Host | Command |
 | --- | --- |
+| Local | `python main.py`, then open `http://127.0.0.1:8000` |
+| LAN demo | `python main.py`, then share your LAN IP:8000 |
 | Railway / Fly / Heroku | `Procfile` is provided; uses `${PORT:-8000}` |
-| Docker | `HOST=0.0.0.0 PORT=8000 python main.py` also works, since `main.py` reads `HOST`/`PORT` |
-| Local network demo | `python main.py`, then share your LAN IP:8000 |
+| Docker | `HOST=0.0.0.0 PORT=8000 python main.py`, since `main.py` reads `HOST`/`PORT` |
+
+To retarget a local copy of the dashboard at a different backend without
+rebuilding:
+
+```bash
+python configure_api_base.py --check
+python configure_api_base.py https://your-host.onrender.com --verify
+python configure_api_base.py --reset      # back to same-origin
+```
+
+`?api=<url>` on the dashboard URL overrides it per-request, and
+`window.ANVAYA_API_BASE` overrides it per-page.
 
 ---
 

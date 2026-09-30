@@ -1,0 +1,152 @@
+# One-time bootstrap: creates the Render web service through the Render API so
+# the dashboard never has to be filled in by hand. Run this ONCE from the
+# Actions tab. After it succeeds, render-deploy.yml redeploys on every push.
+#
+# Repository secrets (Settings -> Secrets and variables -> Actions -> Secrets):
+#   RENDER_API_KEY   from https://render.com/account/api
+#   RENDER_OWNER_ID  your workspace id (Render dashboard -> workspace name,
+#                    or GET https://api.render.com/v1/owners with the key)
+#
+# Repository variable (Settings -> ... -> Variables):
+#   RENDER_SERVICE_NAME   optional, defaults to anvaya-deanon
+#
+# Re-running is safe: if a service with that name already exists it is patched
+# into shape instead of creating a duplicate.
+
+name: Bootstrap Render service
+
+on:
+  workflow_dispatch:
+    inputs:
+      region:
+        description: "Render region: oregon | ohio | virginia | frankfurt | singapore"
+        required: false
+        default: singapore
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Create or adopt Render service
+    runs-on: ubuntu-latest
+    env:
+      API: https://api.render.com
+      KEY: ${{ secrets.RENDER_API_KEY }}
+      OWNER: ${{ secrets.RENDER_OWNER_ID }}
+      SERVICE: ${{ vars.RENDER_SERVICE_NAME || 'anvaya-deanon' }}
+      REGION: ${{ inputs.region }}
+      REPO: ${{ github.server_url }}/${{ github.repository }}
+    steps:
+      - name: Fail fast on missing configuration
+        run: |
+          set -euo pipefail
+          missing=0
+          for v in KEY OWNER; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::secret RENDER_${v} is not set"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          echo "service : $SERVICE"
+          echo "region  : $REGION"
+          echo "repo    : $REPO"
+
+      # Both create and update need this same body, so build it once here.
+      - name: Build service payload
+        run: |
+          set -euo pipefail
+          cat > payload.json <<JSON
+          {
+            "type": "web_service",
+            "name": "$SERVICE",
+            "repo": "$REPO",
+            "branch": "main",
+            "runtime": "python",
+            "plan": "free",
+            "region": "$REGION",
+            "buildCommand": "pip install --no-cache-dir -r requirements.txt",
+            "startCommand": "uvicorn main:app --host 0.0.0.0 --port \$PORT --workers 1",
+            "healthCheckPath": "/api/health",
+            "autoDeploy": "off"
+          }
+          JSON
+          python3 -c "import json;print(json.load(open('payload.json')))"
+
+      - name: Look for an existing service with this name
+        id: lookup
+        run: |
+          set -euo pipefail
+          curl -sS -H "Authorization: Bearer $KEY" \
+            "$API/v1/owners/$OWNER/services" -o services.json
+          id=$(python3 -c "
+          import json,os
+          svc=json.load(open('services.json'))
+          hit=next((s for s in svc
+                    if s.get('service',{}).get('name')==os.environ['SERVICE']),None)
+          print(hit['service']['id'] if hit else '')")
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          [ -n "$id" ] && echo "adopting existing service $id" \
+                       || echo "no service named $SERVICE yet, will create one"
+
+      - name: Create the web service
+        if: steps.lookup.outputs.id == ''
+        id: create
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o created.json -w '%{http_code}' \
+            -X POST "$API/v1/services" \
+            -H "Authorization: Bearer $KEY" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            --data @payload.json)
+          echo "HTTP $code"
+          cat created.json; echo
+          [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || exit 1
+          echo "id=$(python3 -c "import json;print(json.load(open('created.json'))['service']['id'])")" \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Apply configuration
+        id: apply
+        env:
+          SID: ${{ steps.lookup.outputs.id || steps.create.outputs.id }}
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o applied.json -w '%{http_code}' \
+            -X PATCH "$API/v1/services/$SID" \
+            -H "Authorization: Bearer $KEY" \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json' \
+            --data @payload.json)
+          echo "HTTP $code"
+          cat applied.json; echo
+          [ "$code" -ge 200 ] && [ "$code" -lt 300 ] || exit 1
+          python3 - <<'PY'
+          import json
+          s = json.load(open("applied.json"))["service"]
+          for k in ("name","runtime","plan","region","branch",
+                    "buildCommand","startCommand","healthCheckPath"):
+              print(f"  {k:16} {s.get(k)}")
+          PY
+
+      - name: Summary
+        if: always()
+        env:
+          SID: ${{ steps.lookup.outputs.id || steps.create.outputs.id }}
+        run: |
+          echo "### Render service ready" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- service id : \`$SID\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- hostname   : https://$SERVICE.onrender.com" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Two things left to do once, in **Settings -> Secrets and" >> "$GITHUB_STEP_SUMMARY"
+          echo "variables -> Actions**:" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "1. Secret \`RENDER_DEPLOY_HOOK\` - Render dashboard -> $SERVICE ->" >> "$GITHUB_STEP_SUMMARY"
+          echo "   Settings -> Deploy Hook. Makes every push redeploy the API." >> "$GITHUB_STEP_SUMMARY"
+          echo "2. Variable \`ANVAYA_API_BASE\` = https://$SERVICE.onrender.com - points" >> "$GITHUB_STEP_SUMMARY"
+          echo "   the Pages build at the API." >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "The first deploy takes a few minutes; then check" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://$SERVICE.onrender.com/api/health" >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,66 @@
+# Redeploys the FastAPI backend on Render whenever main moves.
+#
+# The service itself is created once by render-bootstrap.yml; this only pokes
+# Render's deploy hook, which is Render's supported way to trigger a build from
+# outside their dashboard. The hook is a bearer secret -- anyone holding it can
+# deploy, so it lives in repository secrets and is never printed.
+#
+# If the secret is absent the job is skipped rather than failed, so a fork or a
+# fresh clone still gets a green Actions tab.
+
+name: Deploy API to Render
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: render-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Trigger Render deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Skip when no deploy hook is configured
+        if: ${{ secrets.RENDER_DEPLOY_HOOK == '' }}
+        run: |
+          echo "::notice::RENDER_DEPLOY_HOOK is not set; nothing to deploy."
+          echo "Run the 'Bootstrap Render service' workflow once to create the"
+          echo "service, then add the deploy hook as a repository secret."
+
+      - name: Trigger the deploy
+        if: ${{ secrets.RENDER_DEPLOY_HOOK != '' }}
+        id: hook
+        run: |
+          set -euo pipefail
+          code=$(curl -sS -o response.json -w '%{http_code}' \
+            -X POST "${{ secrets.RENDER_DEPLOY_HOOK }}" \
+            -H 'Content-Type: application/json' \
+            -d "{\"clearCache\":\"do_not\"}")
+          echo "HTTP $code"
+          cat response.json; echo
+          if [ "$code" -ge 200 ] && [ "$code" -lt 300 ]; then
+            deploy=$(python3 -c "
+          import json
+          print(json.load(open('response.json')).get('deploy',{}).get('id',''))" 2>/dev/null || echo '')
+          echo "id=$deploy" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Render rejected the deploy hook (HTTP $code)"
+            exit 1
+          fi
+
+      - name: Wait for the deploy to go live
+        if: ${{ steps.hook.outputs.id != '' }}
+        run: |
+          set -euo pipefail
+          echo "deploy id ${{ steps.hook.outputs.id }} -- Render will email on failure."
+          echo "Watch progress at https://dashboard.render.com"
+          echo ""
+          echo "Note: free instances spin down after ~15 min idle, so the first"
+          echo "request after a pause can take 30-60s to respond."

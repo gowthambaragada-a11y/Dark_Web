@@ -1,0 +1,104 @@
+# Deploys the static dashboard to GitHub Pages on every push to main.
+#
+# GitHub Pages serves static files only, so this publishes the dashboard while
+# the FastAPI backend is deployed separately by render-deploy.yml. The API origin
+# is injected here at build time from the ANVAYA_API_BASE repository variable.
+#
+# One-time setup (repo Settings -> Pages): set Source to "GitHub Actions".
+# Set the API origin under Settings -> Secrets and variables -> Actions ->
+# Variables:  ANVAYA_API_BASE = https://<your-service>.onrender.com
+
+name: Deploy dashboard to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Let a newer run supersede an in-flight one, but never cancel a deployment
+# mid-publish -- GitHub recommends against cancel-in-progress here.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build dashboard
+    runs-on: ubuntu-latest
+    env:
+      # Repository variable (not a secret -- it is a public hostname).
+      # Falls back to whatever DEFAULT_API_BASE is already committed as.
+      ANVAYA_API_BASE: ${{ vars.ANVAYA_API_BASE }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Configure Pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      # Bake the API origin into the page. The dashboard resolves its base as
+      # ?api= > window.ANVAYA_API_BASE > DEFAULT_API_BASE > same origin, so
+      # writing DEFAULT_API_BASE here needs no changes to the JS itself.
+      - name: Inject API base into dashboard
+        if: env.ANVAYA_API_BASE != ''
+        run: |
+          python3 - <<'PY'
+          import os, re, pathlib
+          base = os.environ["ANVAYA_API_BASE"].strip().rstrip("/")
+          p = pathlib.Path("static/index.html")
+          text = p.read_text(encoding="utf-8")
+          new, n = re.subn(
+              r"^(const DEFAULT_API_BASE = )'[^']*';",
+              lambda m: f"{m.group(1)}'{base}';",
+              text, count=1, flags=re.M)
+          if n != 1:
+              raise SystemExit("could not find DEFAULT_API_BASE declaration")
+          p.write_text(new, encoding="utf-8")
+          print(f"DEFAULT_API_BASE -> {base}")
+          PY
+
+      # Stage exactly what Pages should publish. Pages deploys the artifact
+      # root as the site root, so we do not ship the backend, the corpus or
+      # the test suite to a public bucket.
+      - name: Stage publish directory
+        run: |
+          set -euo pipefail
+          mkdir -p _site/static
+          cp index.html            _site/index.html
+          cp -r static/.           _site/static/
+          printf '' > _site/.nojekyll
+          echo "--- staging ---"
+          find _site -type f | sort
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: Verify the staged dashboard is wired up
+        run: |
+          set -euo pipefail
+          test -s _site/static/index.html
+          grep -q "const DEFAULT_API_BASE = '" _site/static/index.html
+          grep -q "const apiUrl = p => API_BASE" _site/static/index.html
+          grep -q "Recorded, not attributed" _site/static/index.html
+          grep -q "ANVAYA DASHBOARD" _site/static/index.html
+          echo "staged dashboard looks correct"
+
+  deploy:
+    name: Publish to Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
