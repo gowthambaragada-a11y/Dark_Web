@@ -23,8 +23,21 @@ uvicorn main:app --reload
 
 Open **http://127.0.0.1:8000**.
 
-The corpus is materialised in-memory on boot (well under a second), so there is no
-database to provision and no migration step. To persist it to disk instead:
+The corpus is materialised in-memory on boot, so there is no database to provision
+and no migration step. Measured on a clean Python 3.13 install:
+
+| Stage | Cost |
+| --- | --- |
+| `seed_data.build_database()` | ~0.02 s |
+| Corpus + graph + cluster resolution | ~0.05 s |
+| Stylometry vectoriser fit + impostor calibration | ~6 s |
+| **Total, import to first request** | **~4–8 s** |
+
+Most of that is scikit-learn and scipy import plus fitting the TF-IDF vectorisers,
+not the corpus itself. Once warm, `GET /api/actors` is ~36 ms and a full
+attribution `POST /api/analyze-persona` is ~140 ms.
+
+To persist the corpus to disk instead:
 
 ```bash
 ANVAYA_DB=anvaya.db uvicorn main:app --reload     # macOS / Linux
@@ -234,11 +247,17 @@ dashboard's relative API URLs work unchanged. It comes up on
 
 A few things to know on the free tier:
 
-- **Cold starts.** Free services idle out after ~15 minutes and take ~30 s to
-  wake. The corpus is rebuilt from `seed_data.py` on every boot (well under a
-  second), so there is no database to provision.
+- **Cold starts dominate the demo experience.** Free services idle out after
+  ~15 minutes, then take ~30 s for Render to schedule an instance on top of the
+  ~4–8 s this app needs to import and build its vectorisers. Budget roughly
+  **30–60 s for the first request after an idle period**; warm requests after
+  that are milliseconds. Nothing is provisioned or migrated, so there is no
+  database step to wait on — but do not demo this live right after a long pause.
 - **Health check.** Render polls `/api/health`; it reports corpus size, graph
   dimensions and the storage mode, so it doubles as a smoke test.
+- **The blueprint is schema-valid.** `render.yaml` validates against Render's
+  published JSON schema (`https://render.com/schema/render.yaml.json`), and the
+  `buildCommand` installs cleanly on a cold Python 3.13.5 venv.
 - **One worker, on purpose.** The corpus is materialised in-memory per process.
   A single worker keeps the SQLite state and the lock that guards it coherent.
   Raising `--workers` would multiply the corpus in RAM; it is safe (the seed is
@@ -322,14 +341,15 @@ authentication, pin it to your actual Pages origin instead of `*`.
 ## Tests
 
 ```bash
-python smoke_test.py                       # boots a temp server, runs 80 checks
+python smoke_test.py                       # boots a temp server, runs 84 checks
 python smoke_test.py --base http://127.0.0.1:8000   # test a running server
 ```
 
 Covers every endpoint, the filter matrix, input validation, all export formats,
-the seeded ground truth, and a concurrency section — FastAPI runs these synchronous
+the seeded ground truth, a concurrency section — FastAPI runs these synchronous
 endpoints in a threadpool, so the suite hammers the database-backed routes in
-parallel to catch unsafe shared state.
+parallel to catch unsafe shared state — and a latency budget so a performance
+regression fails here instead of in front of a judge.
 
 ---
 

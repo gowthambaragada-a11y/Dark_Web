@@ -1,4 +1,4 @@
-﻿"""
+"""
 smoke_test.py
 =============
 End-to-end regression suite for the Anvaya platform.
@@ -323,6 +323,27 @@ def run_suite(base: str) -> None:
         codes = list(pool.map(parallel_analyze, range(24)))
     check("24 concurrent analyses all 200", all(c == 200 for c in codes),
           f"got {sorted(set(codes))}")
+
+    section("12. response latency budget")
+    # The README quotes these figures. Assert loose ceilings so a regression that
+    # would make the free-tier demo unusable fails here rather than in front of
+    # a judge. Generous multipliers: this box is far faster than Render's 0.1 CPU.
+    def timed(path: str, limit_ms: float) -> None:
+        t0 = time.perf_counter()
+        status, _, _ = request(base, path)
+        ms = (time.perf_counter() - t0) * 1000.0
+        check(f"GET {path} under {limit_ms:.0f}ms", status == 200 and ms < limit_ms,
+              f"{ms:.0f}ms")
+
+    timed("/api/actors", 400)
+    timed("/api/graph", 800)
+    timed("/api/samples", 400)
+
+    t0 = time.perf_counter()
+    status, _, _ = request(base, "/api/analyze-persona", "POST", {"sample_id": "smp-2"})
+    ms = (time.perf_counter() - t0) * 1000.0
+    check(f"POST /api/analyze-persona under 1200ms", status == 200 and ms < 1200,
+          f"{ms:.0f}ms")
 
 
 def main() -> int:
