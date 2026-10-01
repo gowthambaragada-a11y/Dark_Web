@@ -466,10 +466,12 @@ const $$ = (s,r=document)=>Array.from(r.querySelectorAll(s));
  *   3. ANVAYA_API_BASE         baked-in default below (edit for your host)
  *   4. same origin            local dev / single-origin deploy
  *
- * Edit DEFAULT_API_BASE to your deployed backend and redeploy the static
- * copy. Leave it as '' when main.py serves the page.
+ * DEFAULT_API_BASE below is the deployed Render backend. The Pages build
+ * overwrites it from the ANVAYA_API_BASE repository variable when that is
+ * set, so this committed value is only the fallback for local copies and for
+ * the Render-served page, where main.py answers on the same origin.
  * ------------------------------------------------------------------ */
-const DEFAULT_API_BASE = '';   // e.g. 'https://anvaya-deanon.onrender.com'
+const DEFAULT_API_BASE = 'https://dark-web-kts9.onrender.com';
 const API_BASE = (() => {
   const q = new URLSearchParams(location.search).get('api');
   const raw = (q || window.ANVAYA_API_BASE || DEFAULT_API_BASE || '').trim();

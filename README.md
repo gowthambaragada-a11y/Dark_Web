@@ -2,9 +2,16 @@
 
 **Team Anvaya · Smart India Hackathon 2026 · Problem Statement 26151**
 
-### Live dashboard
+### Live instances
 
-**https://gowthambaragada-a11y.github.io/Dark_Web/**
+| | Instance | URL |
+| --- | --- | --- |
+| Dashboard | GitHub Pages | [gowthambaragada-a11y.github.io/Dark_Web](https://gowthambaragada-a11y.github.io/Dark_Web/) |
+| API | Render | [dark-web-kts9.onrender.com](https://dark-web-kts9.onrender.com/) |
+| Health | Render | [dark-web-kts9.onrender.com/api/health](https://dark-web-kts9.onrender.com/api/health) |
+
+The dashboard also runs standalone at
+`https://dark-web-kts9.onrender.com/`, because `main.py` serves it at `/`.
 
 An offline analytical platform that de-anonymizes dark-web threat actors by fusing
 stylometric, cryptographic, financial and infrastructure signals into a single
